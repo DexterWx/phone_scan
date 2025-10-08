@@ -1,0 +1,70 @@
+# Rust
+/target/
+**/*.rs.bk
+Cargo.lock
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Build artifacts
+*.so
+*.a
+*.dll
+*.dylib
+*.exe
+
+# Test outputs
+dev/test_data/
+test_output/
+*.png
+*.jpg
+*.jpeg
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+*.temp
+
+# Android specific
+*.apk
+*.aab
+android/app/build/
+android/build/
+
+# iOS specific
+ios/build/
+*.ipa
+*.app
+
+# OpenCV specific
+opencv_build/
+opencv_install/
+
+# Documentation
+docs/_build/
+
+# Backup files
+*.bak
+*.backup
+
+dev/test_data/*

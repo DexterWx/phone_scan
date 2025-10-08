@@ -1,0 +1,23 @@
+[package]
+name = "phone_scan"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "staticlib"]
+
+[dependencies]
+opencv = { version = "0.96.0", features = ["clang-runtime"] }
+base64 = "0.22.1"
+
+[target.'cfg(target_os = "android")'.dependencies]
+opencv = { version = "0.96.0", features = ["clang-runtime"] }
+
+[target.'cfg(target_os = "ios")'.dependencies]
+opencv = { version = "0.96.0" }
+
+[profile.release]
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
