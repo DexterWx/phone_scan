@@ -1,6 +1,7 @@
 pub mod myutils;
 pub mod models;
 pub mod recognize;
+pub mod config;
 
 // 添加这行导入
 use myutils::test::generate_triangle_image_internal;
