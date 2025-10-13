@@ -1,7 +1,7 @@
-/// 边界检测配置参数 - 静态配置
-pub struct BoundaryDetectionConfig;
+/// 定位参数配置
+pub struct LocationConfig;
 
-impl BoundaryDetectionConfig {
+impl LocationConfig {
     /// 自适应阈值的块大小
     pub const BLOCK_SIZE: i32 = 51;
     
@@ -15,7 +15,10 @@ impl BoundaryDetectionConfig {
     pub const EPSILON_FACTOR: f64 = 0.015;
     
     /// 最小面积占比
-    pub const MIN_AREA_RATIO: f64 = 0.05;
+    pub const MIN_AREA_RATIO: f64 = 0.5;
+    
+    /// 边界惩罚系数
+    pub const MARGIN_PENALTY: f64 = 50.0;
 }
 
 /// 图像处理配置参数
@@ -27,12 +30,4 @@ impl ImageProcessingConfig {
     
     /// 高斯模糊sigma值
     pub const GAUSSIAN_SIGMA: f64 = 0.0;
-}
-
-/// 评分配置参数
-pub struct ScoringConfig;
-
-impl ScoringConfig {
-    /// 边界惩罚系数
-    pub const MARGIN_PENALTY: f64 = 50.0;
 }

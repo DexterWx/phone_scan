@@ -1,10 +1,10 @@
 use anyhow::Result;
 use opencv::{
-    core::{Mat, Point, Rect, Scalar, Size},
-    imgproc::{rectangle, circle, line},
+    core::{Mat, Point, Rect, Scalar, Vector},
+    imgproc::{circle, fill_poly, line, rectangle},
     prelude::*,
 };
-use crate::models::Coordinate;
+use crate::models::{Coordinate, Quad};
 
 /// 渲染模式
 #[derive(Debug, Clone, Copy)]
@@ -64,6 +64,74 @@ pub fn render_coordinate(
                     image,
                     *corner,
                     thickness * 2, // 角点半径
+                    color,
+                    -1,
+                    8,
+                    0,
+                )?;
+            }
+        }
+    }
+    
+    Ok(())
+}
+
+/// 渲染四边形到图像上
+pub fn render_quad(
+    image: &mut Mat,
+    quad: &Quad,
+    mode: Option<RenderMode>,
+    color: Option<Scalar>,
+    thickness: Option<i32>,
+) -> Result<()> {
+    let mode = mode.unwrap_or(RenderMode::Hollow);
+    let color = color.unwrap_or(Colors::green());
+    let thickness = thickness.unwrap_or(2);
+    
+    match mode {
+        RenderMode::Filled => {
+            // 创建点向量用于填充
+            let points_vec = quad.points.iter()
+                .map(|p| Point::new(p.x, p.y))
+                .collect::<Vec<_>>();
+            let points = Vector::<Point>::from_slice(&points_vec);
+            let mut points_vector = Vector::<Vector<Point>>::new();
+            points_vector.push(points);
+            
+            // 填充四边形
+            fill_poly(
+                image,
+                &points_vector,
+                color,
+                8,
+                0,
+                Point::default(),
+            )?;
+        }
+        RenderMode::Hollow => {
+            // 绘制四条边
+            for i in 0..4 {
+                let start = &quad.points[i];
+                let end = &quad.points[(i + 1) % 4];
+                
+                line(
+                    image,
+                    Point::new(start.x, start.y),
+                    Point::new(end.x, end.y),
+                    color,
+                    thickness,
+                    8,
+                    0,
+                )?;
+            }
+        }
+        RenderMode::Corners => {
+            // 只绘制四个角点
+            for point in &quad.points {
+                circle(
+                    image,
+                    Point::new(point.x, point.y),
+                    thickness * 2,
                     color,
                     -1,
                     8,

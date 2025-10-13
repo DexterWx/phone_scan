@@ -38,8 +38,26 @@ mod tests {
     use std::path::Path;
     use opencv::imgcodecs::imwrite;
     use crate::myutils::test::create_triangle_image;
+    use crate::recognize::engine;
+    use anyhow::Result;
 
     use super::*;
+
+    #[test]
+    fn test_demo() -> Result<()> {
+        let scan_id = "1";
+        let scan_path = format!("dev/test_data/cards/{scan_id}/test.json");
+        let img_path = format!("dev/test_data/cards/{scan_id}/test.jpg");
+
+        let scan_string = fs::read_to_string(scan_path)?;
+
+
+
+        let engine = engine::RecEngine::new(&scan_string)?;
+        let res = engine.inference(&img_path)?;
+        println!("{:?}", res);
+        Ok(())
+    }
 
     #[test]
     fn test_generate_triangle_image() {

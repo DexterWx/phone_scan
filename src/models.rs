@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use opencv::core::Point2i as CvPoint2i;
 
 /// 坐标信息
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -13,17 +14,20 @@ pub struct Coordinate {
     pub h: i32,
 }
 
+/// 四边形坐标信息
+#[derive(Debug, Clone)]
+pub struct Quad {
+    /// 四个顶点坐标
+    pub points: [CvPoint2i; 4],
+}
+
 /// 轮廓信息，包含额外的检测数据
 #[derive(Debug, Clone)]
 pub struct ContourInfo {
     /// 轮廓点
-    pub points: opencv::core::Vector<opencv::core::Point2i>,
+    pub points: opencv::core::Vector<CvPoint2i>,
     /// 面积
-    pub area: f64,
-    /// 边界矩形
-    pub bounding_rect: opencv::core::Rect,
-    /// 评分（用于选择最优轮廓）
-    pub score: f64,
+    pub area: f64
 }
 
 /// 处理后的图片数据
