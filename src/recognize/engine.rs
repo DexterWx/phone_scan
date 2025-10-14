@@ -1,13 +1,17 @@
 use anyhow::{Context, Result};
-use crate::models::{Quad, Mark, MobileOutput};
-use crate::myutils::image::{get_perspective_transform_matrix, integral_image, pers_trans_image, process_image, read_image};
+use opencv::core::Mat;
+use crate::models::{Mark, MobileOutput};
+use crate::myutils::image::{get_perspective_transform_matrix, pers_trans_image, process_image};
 use crate::myutils::myjson::from_json;
+use crate::recognize::fill::RecFillModule;
 use crate::recognize::location::LocationModule;
 
 /// 识别引擎
 pub struct RecEngine {
     /// 定位模块
     location_module: LocationModule,
+    /// 填涂识别模块
+    rec_fill_module: RecFillModule,
     /// 初始化mark信息
     mark: Mark,
 }
@@ -16,14 +20,14 @@ impl RecEngine {
     pub fn new(mobile_input: &String) -> Result<Self> {
         Ok(Self {
             location_module: LocationModule::new(),
+            rec_fill_module: RecFillModule::new(),
             mark: from_json(mobile_input)?,
         })
     }
 
-    pub fn inference(&self, image_bs64: &String) -> Result<Quad> {
-        // 1. 读取图片
-        let image = read_image(image_bs64)
-            .context("解析输入失败: 读图失败")?;
+    pub fn inference(&self, image: &Mat) -> Result<MobileOutput> {
+        // 1. 初始化输出
+        let mut mobile_output = MobileOutput::new(&self.mark);
         // 2. 处理图片
         let processed_image = process_image(&image)?;
         
@@ -38,7 +42,8 @@ impl RecEngine {
             &processed_image, &pers_trans_matrix, self.mark.boundary.x+self.mark.boundary.w, self.mark.boundary.y+self.mark.boundary.h
         )?;
 
-        let integral_image = integral_image(&baizheng.thresh)?;
+        // 6. 填涂识别
+        self.rec_fill_module.infer(&baizheng, &mut mobile_output)?;
 
 
         // 渲染
@@ -46,7 +51,7 @@ impl RecEngine {
         {
             use opencv::{core::Vector, imgcodecs::imwrite};
 
-            use crate::myutils::rendering::{render_quad, RenderMode};
+            use crate::myutils::rendering::{render_output, render_quad, Colors, RenderMode};
 
             let mut render_image = image.clone();
             let _ = render_quad(
@@ -68,8 +73,15 @@ impl RecEngine {
             let close_path = format!("dev/test_data/debug/{}.jpg", "baizheng_closed");
             imwrite(&close_path, &baizheng.closed, &params)
                 .context("保存调试图片失败")?;
+
+            let mut render_out = baizheng.gray.clone();
+            let _ = render_output(&mut render_out, &mobile_output, Some(RenderMode::Hollow), Some(Colors::green()), Some(2), Some(2.0));
+            let render_out_path = format!("dev/test_data/debug/{}.jpg", "render_out");
+            imwrite(&render_out_path, &render_out, &params)
+                .context("保存调试图片失败")?;
         }
 
-        Ok(location)
+
+        Ok(mobile_output)
     }
 }

@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use opencv::{
     core::{Mat, Vector, Point2i},
     imgproc,
@@ -153,7 +153,7 @@ impl LocationModule {
         pts.rotate_left(min_index);
     }
 
-    pub fn validate_boundary(&self, boundary: &Quad) -> bool {
+    pub fn validate_boundary(&self, _boundary: &Quad) -> bool {
         // 验证边界
         true
     }

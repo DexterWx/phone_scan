@@ -2,30 +2,22 @@
 /// Otsu算法通过最大化类间方差来确定最佳阈值，适用于双峰直方图
 
 /// 计算给定数据的最佳Otsu阈值
-/// 输入: values - 数据值向量
-/// 返回: 最佳阈值
+/// 输入: values - 数据值向量，值应在0-1之间
+/// 返回: 最佳阈值（分割线），值在0-1之间
 pub fn otsu_threshold(values: &[f64]) -> f64 {
     if values.is_empty() {
         return 0.0;
     }
 
-    // 确定直方图范围
-    let min_val = values.iter().fold(f64::INFINITY, |a, &b| a.min(b));
-    let max_val = values.iter().fold(f64::NEG_INFINITY, |a, &b| a.max(b));
-    
-    // 如果所有值相同，直接返回该值
-    if (max_val - min_val).abs() < f64::EPSILON {
-        return min_val;
-    }
-    
-    // 创建256个bins的直方图
-    const NUM_BINS: usize = 256;
+    // 对于0-1之间的浮点数，使用更精细的bins
+    const NUM_BINS: usize = 1000;
     let mut histogram = [0usize; NUM_BINS];
-    let bin_width = (max_val - min_val) / (NUM_BINS - 1) as f64;
     
-    // 填充直方图
+    // 填充直方图（值应在0-1之间）
     for &value in values {
-        let bin_index = ((value - min_val) / bin_width) as usize;
+        // 确保值在0-1范围内
+        let clamped_value = value.max(0.0).min(1.0);
+        let bin_index = (clamped_value * (NUM_BINS - 1) as f64) as usize;
         // 防止索引越界
         let bin_index = bin_index.min(NUM_BINS - 1);
         histogram[bin_index] += 1;
@@ -52,9 +44,6 @@ pub fn otsu_threshold(values: &[f64]) -> f64 {
         return 0.0;
     }
     
-    // 计算全局均值
-    let global_mean = total_moments / total_pixels as f64;
-    
     // 寻找最大类间方差
     let mut max_variance = 0.0;
     let mut best_threshold = 0.0;
@@ -80,8 +69,8 @@ pub fn otsu_threshold(values: &[f64]) -> f64 {
         
         if variance > max_variance {
             max_variance = variance;
-            // 将bin索引转换回值域
-            best_threshold = min_val + (i as f64) * bin_width;
+            // 将bin索引转换回0-1范围
+            best_threshold = (i as f64) / (NUM_BINS - 1) as f64;
         }
     }
     
@@ -96,25 +85,25 @@ mod tests {
     fn test_otsu_threshold() {
         // 测试简单双峰分布
         let mut values = vec![];
-        // 添加低值峰
+        // 添加低值峰 (接近0)
         for _ in 0..100 {
-            values.push(20.0);
+            values.push(0.1);
         }
-        // 添加高值峰
+        // 添加高值峰 (接近1)
         for _ in 0..100 {
-            values.push(200.0);
+            values.push(0.9);
         }
         
         let threshold = otsu_threshold(&values);
         // 阈值应该在两个峰之间
-        assert!(threshold > 20.0 && threshold < 200.0);
+        assert!(threshold > 0.1 && threshold < 0.9);
     }
     
     #[test]
     fn test_otsu_threshold_single_value() {
-        let values = vec![100.0; 50];
+        let values = vec![0.5; 50];
         let threshold = otsu_threshold(&values);
-        assert_eq!(threshold, 100.0);
+        assert_eq!(threshold, 0.5);
     }
     
     #[test]
@@ -122,5 +111,13 @@ mod tests {
         let values: Vec<f64> = vec![];
         let threshold = otsu_threshold(&values);
         assert_eq!(threshold, 0.0);
+    }
+    
+    #[test]
+    fn test_otsu_threshold_values_out_of_range() {
+        let values = vec![-0.5, 0.2, 1.5, 0.8]; // 包含超出0-1范围的值
+        let threshold = otsu_threshold(&values);
+        // 即使输入有超出范围的值，输出也应该在0-1之间
+        assert!(threshold >= 0.0 && threshold <= 1.0);
     }
 }
