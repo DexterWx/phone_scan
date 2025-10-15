@@ -91,7 +91,7 @@ Get-ChildItem Env: | Where-Object {{$_.Name -match "OPENCV|LIBCLANG|ANDROID|PATH
                 sys.exit(1)
         else:
             run_command(f'pwsh -ExecutionPolicy Bypass -File "{script_dir}/windows_env.ps1"')
-        run_command('cargo build --release')
+        run_command('cargo build --release --target x86_64-pc-windows-msvc')
         
     elif platform == 'android':
         print('Setting up Android environment...')

@@ -20,8 +20,13 @@ opencv = { version = "0.96.0", features = ["clang-runtime"] }
 opencv = { version = "0.96.0", features = ["clang-runtime"] }
 
 [profile.release]
-lto = true
-codegen-units = 1
-panic = "abort"
-strip = true
+opt-level = 3           # 最大优化等级
+lto = true            # 跨 crate 链接时全局优化
+codegen-units = 1       # 所有 crate 在同一个代码生成单元中
+panic = "abort"         # panic 直接 abort
+strip = true            # 移除符号表
+debug = false           # 移除调试信息
+overflow-checks = false # 关闭整数溢出检查
+
+
 

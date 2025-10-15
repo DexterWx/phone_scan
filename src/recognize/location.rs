@@ -102,9 +102,19 @@ impl LocationModule {
         let epsilon = LocationConfig::EPSILON_FACTOR * imgproc::arc_length(&best.points, true)?; 
         imgproc::approx_poly_dp(&best.points, &mut approx_curve, epsilon, true)?;
         
-        // 确保我们有4个点
+        // 如果点数不是4，使用凸包作为备选方案
         if approx_curve.len() != 4 {
-            anyhow::bail!("未能找到合适的四边形，检测到的顶点数: {}", approx_curve.len());
+            let mut hull = Vector::<Point2i>::new();
+            imgproc::convex_hull(&best.points, &mut hull, true, true)?;
+            
+            // 对凸包进行多边形逼近
+            imgproc::approx_poly_dp(&hull, &mut approx_curve, epsilon, true)?;
+            
+            // 如果凸包逼近后仍然不是4个点，则报错
+            if approx_curve.len() != 4 {
+                anyhow::bail!("未能找到合适的四边形，原始轮廓顶点数: {}，凸包逼近后顶点数: {}", 
+                    best.points.len(), approx_curve.len());
+            }
         }
         
         // 提取四个点

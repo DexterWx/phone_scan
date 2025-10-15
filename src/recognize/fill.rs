@@ -23,7 +23,9 @@ impl RecFillModule {
         let thresh = (thresh * 100.0).round() / 100.0;
 
         #[cfg(debug_assertions)]
-        println!("填涂率阈值: {:.4}", thresh);
+        {
+            println!("填涂率阈值: {:.4}", thresh);
+        }
 
         // 3. 单选识别
         self.rec_single_fill(mobile_output, thresh)?;

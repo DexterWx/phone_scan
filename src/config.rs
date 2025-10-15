@@ -9,13 +9,13 @@ impl LocationConfig {
     pub const C: i32 = 5;
     
     /// 形态学操作的核大小
-    pub const MORPH_KERNEL: i32 = 7;
+    pub const MORPH_KERNEL: i32 = 3;
     
     /// 多边形逼近的epsilon因子
     pub const EPSILON_FACTOR: f64 = 0.015;
     
     /// 最小面积占比
-    pub const MIN_AREA_RATIO: f64 = 0.5;
+    pub const MIN_AREA_RATIO: f64 = 0.4;
     
     /// 边界惩罚系数
     pub const MARGIN_PENALTY: f64 = 50.0;

@@ -49,7 +49,7 @@ impl RecEngine {
         // 渲染
         #[cfg(debug_assertions)]
         {
-            use opencv::{core::Vector, imgcodecs::imwrite};
+            use opencv::{core::{AlgorithmHint, Vector}, imgcodecs::imwrite, imgproc};
 
             use crate::myutils::rendering::{render_output, render_quad, Colors, RenderMode};
 
@@ -75,7 +75,11 @@ impl RecEngine {
                 .context("保存调试图片失败")?;
 
             let mut render_out = baizheng.gray.clone();
-            let _ = render_output(&mut render_out, &mobile_output, Some(RenderMode::Hollow), Some(Colors::green()), Some(2), Some(2.0));
+            // 将灰度图转换为RGB格式
+            let mut rgb_image = Mat::default();
+            imgproc::cvt_color(&render_out, &mut rgb_image, imgproc::COLOR_GRAY2BGR, 0, AlgorithmHint::ALGO_HINT_DEFAULT)?;
+            render_out = rgb_image;
+            let _ = render_output(&mut render_out, &mobile_output, Some(RenderMode::Hollow), Some(Colors::orange()), Some(2), Some(2.0));
             let render_out_path = format!("dev/test_data/debug/{}.jpg", "render_out");
             imwrite(&render_out_path, &render_out, &params)
                 .context("保存调试图片失败")?;

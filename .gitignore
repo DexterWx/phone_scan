@@ -67,4 +67,8 @@ docs/_build/
 *.bak
 *.backup
 
+# python
+__pycache__/
+
+# dev
 dev/test_data/*

@@ -223,7 +223,7 @@ pub fn render_output(
                 Point::new(text_x, text_y),
                 opencv::imgproc::FONT_HERSHEY_SIMPLEX,
                 0.3,  // 根据缩放调整字体大小
-                color,
+                Colors::blue(),
                 1,
                 opencv::imgproc::LINE_8,
                 false
@@ -243,4 +243,5 @@ impl Colors {
     pub fn yellow() -> Scalar { Scalar::new(0.0, 255.0, 255.0, 0.0) }
     pub fn white() -> Scalar { Scalar::new(255.0, 255.0, 255.0, 0.0) }
     pub fn black() -> Scalar { Scalar::new(0.0, 0.0, 0.0, 0.0) }
+    pub fn orange() -> Scalar { Scalar::new(0.0, 165.0, 255.0, 0.0) }
 }
