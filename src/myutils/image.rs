@@ -45,11 +45,21 @@ pub fn read_image(input: &String) -> Result<Mat> {
     }
 }
 
+pub fn resize_image(image: &Mat, target_width: i32) -> Result<Mat> {
+    let mut resized = Mat::default();
+    let scale = target_width as f64 / image.cols() as f64;
+    imgproc::resize(image, &mut resized, Size::new(target_width, -1), scale, scale, imgproc::INTER_LINEAR)?;
+    Ok(resized)
+}
+
 /// 图片预处理：灰度化、高斯模糊、二值化、形态学操作
 pub fn process_image(image: &Mat) -> Result<ProcessedImage> {
+    // 0. 图片统一到宽度
+    let resized = resize_image(image, LocationConfig::TARGET_WIDTH)?;
+
     // 1. 灰度化
     let mut gray = Mat::default();
-    imgproc::cvt_color(image, &mut gray, imgproc::COLOR_BGR2GRAY, 0, AlgorithmHint::ALGO_HINT_DEFAULT)?;
+    imgproc::cvt_color(&resized, &mut gray, imgproc::COLOR_BGR2GRAY, 0, AlgorithmHint::ALGO_HINT_DEFAULT)?;
 
     // 2. 高斯模糊
     let mut blur = Mat::default();

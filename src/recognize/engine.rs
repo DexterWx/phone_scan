@@ -51,9 +51,9 @@ impl RecEngine {
         {
             use opencv::{core::{AlgorithmHint, Vector}, imgcodecs::imwrite, imgproc};
 
-            use crate::myutils::rendering::{render_output, render_quad, Colors, RenderMode};
+            use crate::{config::LocationConfig, myutils::{image::resize_image, rendering::{render_output, render_quad, Colors, RenderMode}}};
 
-            let mut render_image = image.clone();
+            let mut render_image = resize_image(image, LocationConfig::TARGET_WIDTH)?;
             let _ = render_quad(
                 &mut render_image, &location, Some(RenderMode::Hollow), None, None
             )?;

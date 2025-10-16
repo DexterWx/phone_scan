@@ -2,6 +2,9 @@
 pub struct LocationConfig;
 
 impl LocationConfig {
+    /// 统一输入图像的宽度
+    pub const TARGET_WIDTH: i32 = 2000;
+
     /// 自适应阈值的块大小
     pub const BLOCK_SIZE: i32 = 51;
     
