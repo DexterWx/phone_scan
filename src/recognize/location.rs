@@ -5,7 +5,7 @@ use opencv::{
     prelude::*,
 };
 use crate::models::{ContourInfo, Quad, ProcessedImage};
-use crate::config::LocationConfig;
+use crate::config::ImageProcessingConfig;
 
 pub struct LocationModule;
 
@@ -39,7 +39,7 @@ impl LocationModule {
 
         let h = morphology.rows();
         let w = morphology.cols();
-        let min_area = LocationConfig::MIN_AREA_RATIO * (w as f64) * (h as f64);
+        let min_area = ImageProcessingConfig::MIN_AREA_RATIO * (w as f64) * (h as f64);
 
         let mut contour_infos = Vec::new();
         for i in 0..contours.len() {
@@ -87,7 +87,7 @@ impl LocationModule {
             let margin = x.min(y).min(w - x - cw).min(h - y - ch).max(0); // 取最小边距，且不小于0
             
             // score = area - margin * penalty
-            let score = area - (margin as f64) * LocationConfig::MARGIN_PENALTY;
+            let score = area - (margin as f64) * ImageProcessingConfig::MARGIN_PENALTY;
             
             if score > best_score {
                 best_score = score;
@@ -99,7 +99,7 @@ impl LocationModule {
         
         // 使用轮廓近似算法提取四边形
         let mut approx_curve = Vector::<Point2i>::new();
-        let epsilon = LocationConfig::EPSILON_FACTOR * imgproc::arc_length(&best.points, true)?; 
+        let epsilon = ImageProcessingConfig::EPSILON_FACTOR * imgproc::arc_length(&best.points, true)?; 
         imgproc::approx_poly_dp(&best.points, &mut approx_curve, epsilon, true)?;
         
         // 如果点数不是4，使用凸包作为备选方案

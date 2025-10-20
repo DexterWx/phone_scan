@@ -1,13 +1,14 @@
 use opencv::{
     core::{AlgorithmHint, Mat, Point2i, Point2f, Size, Vector},
+    calib3d,
     imgcodecs::{imdecode, imread, IMREAD_COLOR},
     imgproc,
     prelude::*,
 };
 use base64::{Engine as _, engine::general_purpose};
 use anyhow::{Result, Context};
-use crate::models::{ProcessedImage, Coordinate, Quad};
-use crate::config::{LocationConfig, ImageProcessingConfig};
+use crate::models::{AssistLocation, Coordinate, ProcessedImage, Quad};
+use crate::config::ImageProcessingConfig;
 
 pub fn read_image(input: &String) -> Result<Mat> {
     // 判断输入是文件路径还是base64字符串
@@ -55,7 +56,7 @@ pub fn resize_image(image: &Mat, target_width: i32) -> Result<Mat> {
 /// 图片预处理：灰度化、高斯模糊、二值化、形态学操作
 pub fn process_image(image: &Mat) -> Result<ProcessedImage> {
     // 0. 图片统一到宽度
-    let resized = resize_image(image, LocationConfig::TARGET_WIDTH)?;
+    let resized = resize_image(image, ImageProcessingConfig::TARGET_WIDTH)?;
 
     // 1. 灰度化
     let mut gray = Mat::default();
@@ -74,14 +75,14 @@ pub fn process_image(image: &Mat) -> Result<ProcessedImage> {
         255.0,
         imgproc::ADAPTIVE_THRESH_GAUSSIAN_C,
         imgproc::THRESH_BINARY_INV,
-        LocationConfig::BLOCK_SIZE,
-        LocationConfig::C as f64,
+        ImageProcessingConfig::BLOCK_SIZE,
+        ImageProcessingConfig::C as f64,
     )?;
 
     // 4. 形态学闭操作
     let kernel = imgproc::get_structuring_element(
         imgproc::MORPH_ELLIPSE,
-        Size::new(LocationConfig::MORPH_KERNEL, LocationConfig::MORPH_KERNEL),
+        Size::new(ImageProcessingConfig::MORPH_KERNEL, ImageProcessingConfig::MORPH_KERNEL),
         Point2i::new(-1, -1),
     )?;
     let mut closed = Mat::default();
@@ -106,7 +107,7 @@ pub fn process_image(image: &Mat) -> Result<ProcessedImage> {
 /// 计算透视变换矩阵
 /// detected_quad: 检测到的四边形（实际图片中的四边形）
 /// target_rect: 目标矩形区域（xywh格式）
-pub fn get_perspective_transform_matrix(
+pub fn get_perspective_transform_matrix_with_boundary(
     detected_quad: &Quad,
     target_rect: &Coordinate,
 ) -> Result<Mat> {
@@ -117,6 +118,32 @@ pub fn get_perspective_transform_matrix(
     // 计算透视变换矩阵
     let transform_matrix = imgproc::get_perspective_transform(&src_points, &target_points, 0)
         .context("计算透视变换矩阵失败")?;
+
+    Ok(transform_matrix)
+}
+
+pub fn get_perspective_transform_matrix_with_assists(
+    src_assists: &AssistLocation,
+    target_assists: &AssistLocation,
+) -> Result<Mat> {
+    let src_coors = vec![src_assists.left.clone(), src_assists.right.clone()].concat();
+    let target_coors = vec![target_assists.left.clone(), target_assists.right.clone()].concat();
+    // 将检测到的点转换为 OpenCV Mat（CV_32FC2）
+    let src_points = get_points_from_coordinates(&src_coors);
+    let target_points = get_points_from_coordinates(&target_coors);
+
+    // 输出 mask，用于查看哪些点是 inlier
+    let mut mask = Mat::default();
+
+    // 调用 RANSAC 版本的 findHomography
+    let transform_matrix = calib3d::find_homography(
+        &src_points,
+        &target_points,
+        &mut mask,
+        calib3d::RANSAC,  // 也可用 calib3d::LMEDS 或 0
+        3.0,               // ransac_reproj_threshold (像素)
+    )
+    .context("使用 RANSAC 计算透视变换矩阵失败")?;
 
     Ok(transform_matrix)
 }
@@ -140,6 +167,16 @@ pub fn get_points_from_coordinate(coordinate: &Coordinate) -> Vector<Point2f> {
         Point2f::new((coordinate.x + coordinate.w) as f32, (coordinate.y + coordinate.h) as f32), // 右下角
         Point2f::new(coordinate.x as f32, (coordinate.y + coordinate.h) as f32),                 // 左下角
     ]);
+    points
+}
+
+pub fn get_points_from_coordinates(coors: &Vec<Coordinate>) -> Vector<Point2f> {
+    let mut points = Vector::<Point2f>::new();
+    for coor in coors {
+        let center_x = (coor.x + coor.w / 2) as f32;
+        let center_y = (coor.y + coor.h / 2) as f32;
+        points.push(Point2f::new(center_x, center_y));
+    }
     points
 }
 
@@ -213,4 +250,18 @@ pub fn integral_image(image: &Mat) -> Result<Mat> {
     Ok(integral)
 }
 
+
+pub fn merge_coordinates(coordinates: &Vec<Coordinate>, extend_size: i32) -> Coordinate {
+    let mut x = coordinates.iter().map(|c| c.x).min().unwrap();
+    let mut y = coordinates.iter().map(|c| c.y).min().unwrap();
+    let mut w = coordinates.iter().map(|c| c.x + c.w).max().unwrap() - x;
+    let mut h = coordinates.iter().map(|c| c.y + c.h).max().unwrap() - y;
+
+    x-= extend_size;
+    y-= extend_size;
+    w+= extend_size*2;
+    h+= extend_size*2;
+
+    Coordinate { x, y, w, h }   
+}
 

@@ -1,5 +1,6 @@
 use anyhow::{Ok, Result};
 use opencv::core::{Mat, MatTraitConst};
+use crate::config::FillConfig;
 use crate::models::{Coordinate, MobileOutput, ProcessedImage, RecType};
 use crate::models::FillItem;
 
@@ -21,8 +22,8 @@ impl RecFillModule {
             .flat_map(|rec_result| rec_result.fill_items.iter().map(|item| item.fill_rate))
             .collect::<Vec<f64>>();
         let (mut thresh, _) = crate::myutils::math::otsu_threshold(&fill_rates);
+        thresh = thresh.max(FillConfig::FILL_RATE_MIN);
         thresh = (thresh * 100.0).round() / 100.0;
-        // thresh += 0.01;
 
         #[cfg(debug_assertions)]
         {
@@ -88,58 +89,13 @@ impl RecFillModule {
         for rec_result in mobile_output.rec_results.iter_mut() {
             let fill_items = &mut rec_result.fill_items;
             for fill_item in fill_items.iter_mut() {
-                let fill_rate = self.calculate_fill_rate(integral_image, &mut fill_item.coordinate)?;
+                let fill_rate = calculate_fill_rate(integral_image, &mut fill_item.coordinate)?;
                 fill_item.fill_rate = fill_rate;
             }
         }
 
         Ok(())
     }
-
-    /// 计算指定区域的填涂率（白色像素占比）
-    /// 使用积分图加速计算，积分图可能比原图大1个像素
-    pub fn calculate_fill_rate(&self, integral_image: &Mat, coordinate: &Coordinate) -> Result<f64> {
-        // 获取积分图尺寸
-        let integral_rows = integral_image.rows();
-        let integral_cols = integral_image.cols();
-        
-        // 检查坐标是否有效
-        if coordinate.x < 0 || coordinate.y < 0 || 
-           coordinate.x + coordinate.w > integral_cols - 1 || 
-           coordinate.y + coordinate.h > integral_rows - 1 {
-            anyhow::bail!("坐标超出积分图范围");
-        }
-        
-        // 由于积分图比原图大1像素，需要调整坐标
-        // 积分图的(0,0)对应原图的(-1,-1)位置
-        let x1 = coordinate.x as i32 + 1; // 左上角x坐标
-        let y1 = coordinate.y as i32 + 1; // 左上角y坐标
-        let x2 = x1 + coordinate.w as i32 - 1; // 右下角x坐标
-        let y2 = y1 + coordinate.h as i32 - 1; // 右下角y坐标
-        
-        // 从积分图获取四个角的值
-        // 积分图通常是i32类型，需要解引用后再转换为f64进行计算
-        let a = *integral_image.at_2d::<i32>(y1 - 1, x1 - 1)? as f64; // 左上角上方
-        let b = *integral_image.at_2d::<i32>(y1 - 1, x2)? as f64;     // 右上角上方
-        let c = *integral_image.at_2d::<i32>(y2, x1 - 1)? as f64;     // 左下角左侧
-        let d = *integral_image.at_2d::<i32>(y2, x2)? as f64;         // 右下角
-        
-        // 使用积分图计算区域和
-        let sum = d - b - c + a;
-        
-        // 计算区域面积
-        let area = coordinate.w as f64 * coordinate.h as f64;
-        
-        // 计算白色像素占比（填涂率）
-        // 由于二值图中白色为255，黑色为0，所以需要将和除以255得到白色像素数量
-        let white_pixels = sum / 255.0;
-        let fill_rate = white_pixels / area;
-        
-        Ok(fill_rate)
-    }
-
-
-
 
     fn _calculate_max_fill_rate(&self, integral_image: &Mat, coordinate: &mut Coordinate) -> Result<f64> {
         let mut max_fill_rate = 0.0;
@@ -151,7 +107,7 @@ impl RecFillModule {
                     w: coordinate.w,
                     h: coordinate.h,
                 };
-                let fill_rate = self.calculate_fill_rate(integral_image, &new_coordinate)?;
+                let fill_rate = calculate_fill_rate(integral_image, &new_coordinate)?;
                 if fill_rate > max_fill_rate {
                     max_fill_rate = fill_rate;
                     coordinate.x = new_coordinate.x;
@@ -181,7 +137,7 @@ impl RecFillModule {
                         w: fill_item.coordinate.w,
                         h: fill_item.coordinate.h,
                     };
-                    let fill_rate = self.calculate_fill_rate(integral_image, &new_coordinate)?;
+                    let fill_rate = calculate_fill_rate(integral_image, &new_coordinate)?;
                     fill_rates.push(fill_rate);
                     new_coors.push(new_coordinate);
                 }
@@ -196,4 +152,44 @@ impl RecFillModule {
         }
         Ok(())
     }
+}
+
+
+/// 计算指定区域的填涂率（白色像素占比）
+pub fn calculate_fill_rate(integral_image: &Mat, coordinate: &Coordinate) -> Result<f64> {
+    // 获取积分图尺寸
+    let integral_rows = integral_image.rows();
+    let integral_cols = integral_image.cols();
+    
+    // 检查坐标是否有效
+    if coordinate.x < 0 || coordinate.y < 0 || 
+        coordinate.x + coordinate.w > integral_cols - 1 || 
+        coordinate.y + coordinate.h > integral_rows - 1 {
+        anyhow::bail!("坐标超出积分图范围");
+    }
+    
+    let x1 = coordinate.x as i32; // 左上角x坐标
+    let y1 = coordinate.y as i32; // 左上角y坐标
+    let x2 = x1 + coordinate.w as i32; // 右下角x坐标
+    let y2 = y1 + coordinate.h as i32; // 右下角y坐标
+    
+    // 从积分图获取四个角的值
+    // 积分图通常是i32类型，需要解引用后再转换为f64进行计算
+    let a = *integral_image.at_2d::<i32>(y1, x1)? as f64; // 左上角上方
+    let b = *integral_image.at_2d::<i32>(y1, x2)? as f64;     // 右上角上方
+    let c = *integral_image.at_2d::<i32>(y2, x1)? as f64;     // 左下角左侧
+    let d = *integral_image.at_2d::<i32>(y2, x2)? as f64;         // 右下角
+    
+    // 使用积分图计算区域和
+    let sum = d - b - c + a;
+    
+    // 计算区域面积
+    let area = coordinate.w as f64 * coordinate.h as f64;
+    
+    // 计算白色像素占比（填涂率）
+    // 由于二值图中白色为255，黑色为0，所以需要将和除以255得到白色像素数量
+    let white_pixels = sum / 255.0;
+    let fill_rate = white_pixels / area;
+    
+    Ok(fill_rate)
 }

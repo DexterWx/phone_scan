@@ -1,7 +1,14 @@
-/// 定位参数配置
-pub struct LocationConfig;
 
-impl LocationConfig {
+/// 图像处理配置参数
+pub struct ImageProcessingConfig;
+
+impl ImageProcessingConfig {
+    /// 高斯模糊核大小
+    pub const GAUSSIAN_KERNEL_SIZE: i32 = 5;
+    
+    /// 高斯模糊sigma值
+    pub const GAUSSIAN_SIGMA: f64 = 0.0;
+
     /// 统一输入图像的宽度
     pub const TARGET_WIDTH: i32 = 2400;
 
@@ -24,13 +31,20 @@ impl LocationConfig {
     pub const MARGIN_PENALTY: f64 = 50.0;
 }
 
-/// 图像处理配置参数
-pub struct ImageProcessingConfig;
 
-impl ImageProcessingConfig {
-    /// 高斯模糊核大小
-    pub const GAUSSIAN_KERNEL_SIZE: i32 = 5;
-    
-    /// 高斯模糊sigma值
-    pub const GAUSSIAN_SIGMA: f64 = 0.0;
+pub struct AssistLocationConfig;
+impl AssistLocationConfig {
+    pub const ASSIST_AREA_EXTEND_SIZE: i32 = 6;
+    /// 辅助定位点的标准大小
+    pub const ASSIST_POINT_MIN_SIZE: i32 = 4;
+    pub const ASSIST_POINT_MAX_SIZE: i32 = 9;
+    pub const ASSIST_POINT_MIN_AREA: f64 = 20.0;
+    pub const ASSIST_POINT_MAX_AREA: f64 = 70.0;
+    pub const ASSIST_POINT_MIN_FILL_RATIO: f64 = 0.9;
+    pub const ASSIST_POINT_WHDIFF_MAX: i32 = 2;
+}
+
+pub struct FillConfig;
+impl FillConfig {
+    pub const FILL_RATE_MIN: f64 = 0.5;
 }

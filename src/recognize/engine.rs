@@ -1,11 +1,11 @@
 use anyhow::{Context, Result};
 use opencv::core::Mat;
 use crate::models::{Mark, MobileOutput};
-use crate::myutils::image::{get_perspective_transform_matrix, pers_trans_image, process_image};
+use crate::myutils::image::{get_perspective_transform_matrix_with_boundary, get_perspective_transform_matrix_with_assists, pers_trans_image, process_image};
 use crate::myutils::myjson::from_json;
 use crate::recognize::fill::RecFillModule;
 use crate::recognize::location::LocationModule;
-use crate::recognize::assist_location::{self, AssistLocationModule};
+use crate::recognize::assist_location::AssistLocationModule;
 
 /// 识别引擎
 pub struct RecEngine {
@@ -39,7 +39,7 @@ impl RecEngine {
         let location = self.location_module.infer(&processed_image)?;
 
         // 4. 获取变换矩阵
-        let pers_trans_matrix = get_perspective_transform_matrix(&location, &self.mark.boundary)?;
+        let pers_trans_matrix = get_perspective_transform_matrix_with_boundary(&location, &self.mark.boundary)?;
 
         // 5. 第一次变换
         let baizheng = pers_trans_image(
@@ -48,8 +48,15 @@ impl RecEngine {
 
         // 6. 找到辅助定位点
         let assist_location = self.assist_location_module.infer(&baizheng, &self.mark.assist_location)?;
-
-        // 7. 填涂识别
+        
+        // 7. 获取变换矩阵
+        let pers_trans_matrix = get_perspective_transform_matrix_with_assists(&assist_location, &self.mark.assist_location)?;
+        
+        // 8. 第二次变换
+        let baizheng = pers_trans_image(
+            &baizheng, &pers_trans_matrix, self.mark.boundary.x+self.mark.boundary.w, self.mark.boundary.y+self.mark.boundary.h
+        )?;
+        // 9. 填涂识别
         self.rec_fill_module.infer(&baizheng, &mut mobile_output)?;
 
 
@@ -58,9 +65,9 @@ impl RecEngine {
         {
             use opencv::{core::{AlgorithmHint, Vector}, imgcodecs::imwrite, imgproc};
 
-            use crate::{config::LocationConfig, myutils::{image::resize_image, rendering::{render_assist_location, render_output, render_quad, Colors, RenderMode}}};
+            use crate::{config::ImageProcessingConfig, myutils::{image::resize_image, rendering::{render_assist_location, render_output, render_quad, Colors, RenderMode}}};
 
-            let mut render_image = resize_image(image, LocationConfig::TARGET_WIDTH)?;
+            let mut render_image = resize_image(image, ImageProcessingConfig::TARGET_WIDTH)?;
             let _ = render_quad(
                 &mut render_image, &location, Some(RenderMode::Hollow), None, None
             )?;
@@ -86,7 +93,7 @@ impl RecEngine {
             let mut rgb_image = Mat::default();
             imgproc::cvt_color(&render_out, &mut rgb_image, imgproc::COLOR_GRAY2BGR, 0, AlgorithmHint::ALGO_HINT_DEFAULT)?;
             render_out = rgb_image;
-            let _ = render_output(&mut render_out, &mobile_output, &assist_location,Some(RenderMode::Hollow), Some(Colors::orange()), Some(2), Some(2.0));
+            let _ = render_output(&mut render_out, &mobile_output, &self.mark.assist_location,Some(RenderMode::Hollow), Some(Colors::orange()), Some(2), Some(2.0));
 
             let render_out_path = format!("dev/test_data/debug/{}.jpg", "render_out");
             imwrite(&render_out_path, &render_out, &params)
