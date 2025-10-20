@@ -14,7 +14,7 @@ pub struct Coordinate {
     pub h: i32,
 }
 
-/// 四边形坐标信息
+/// 非矩形四边形
 #[derive(Debug, Clone)]
 pub struct Quad {
     /// 四个顶点坐标
@@ -83,6 +83,14 @@ pub struct Mark {
     pub boundary: Coordinate,
     /// 需要识别的项目
     pub rec_items: Vec<RecItem>,
+    /// 辅助定位
+    pub assist_location: AssistLocation,
+}
+/// 辅助定位点
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AssistLocation {
+    pub left: Vec<Coordinate>,
+    pub right: Vec<Coordinate>,
 }
 
 /// 识别结果

@@ -4,7 +4,7 @@ use opencv::{
     imgproc::{circle, fill_poly, line, rectangle},
     prelude::*,
 };
-use crate::models::{Coordinate, MobileOutput, Quad};
+use crate::models::{AssistLocation, Coordinate, MobileOutput, Quad};
 
 /// 渲染模式
 #[derive(Debug, Clone, Copy)]
@@ -162,6 +162,7 @@ pub fn render_coordinates(
 pub fn render_output(
     image: &mut Mat,
     mobile_output: &MobileOutput,
+    assist_location: &AssistLocation,
     mode: Option<RenderMode>,
     color: Option<Scalar>,
     thickness: Option<i32>,
@@ -231,6 +232,47 @@ pub fn render_output(
         }
     }
 
+    for assist_location in assist_location.left.iter() {
+        let scaled_coord = Coordinate {
+            x: (assist_location.x as f64 * scale) as i32,
+            y: (assist_location.y as f64 * scale) as i32,
+            w: (assist_location.w as f64 * scale) as i32,
+            h: (assist_location.h as f64 * scale) as i32,
+        };
+        render_coordinate(image, &scaled_coord, Some(mode), Some(color), Some(1))?;
+    }
+    for assist_location in assist_location.right.iter() {
+        let scaled_coord = Coordinate {
+            x: (assist_location.x as f64 * scale) as i32,
+            y: (assist_location.y as f64 * scale) as i32,
+            w: (assist_location.w as f64 * scale) as i32,
+            h: (assist_location.h as f64 * scale) as i32,
+        };
+        render_coordinate(image, &scaled_coord, Some(mode), Some(color), Some(1))?;
+    }
+
+    Ok(())
+}
+
+
+/// 渲染辅助定位点
+pub fn render_assist_location(
+    image: &mut Mat,
+    assist_location: &AssistLocation,
+    mode: Option<RenderMode>,
+    color: Option<Scalar>,
+    thickness: Option<i32>,
+) -> Result<()> {
+    let mode = mode.unwrap_or(RenderMode::Hollow);
+    let color = color.unwrap_or(Colors::red());
+    let thickness = thickness.unwrap_or(1);
+
+    for assist_location in assist_location.left.iter() {
+        render_coordinate(image, &assist_location, Some(mode), Some(color), Some(thickness))?;
+    }
+    for assist_location in assist_location.right.iter() {
+        render_coordinate(image, &assist_location, Some(mode), Some(color), Some(thickness))?;
+    }
     Ok(())
 }
 

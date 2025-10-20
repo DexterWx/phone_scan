@@ -111,20 +111,8 @@ pub fn get_perspective_transform_matrix(
     target_rect: &Coordinate,
 ) -> Result<Mat> {
     // 将检测到的点转换为OpenCV格式
-    let src_points = Vector::<Point2f>::from_slice(&[
-        Point2f::new(detected_quad.points[0].x as f32, detected_quad.points[0].y as f32),
-        Point2f::new(detected_quad.points[1].x as f32, detected_quad.points[1].y as f32),
-        Point2f::new(detected_quad.points[2].x as f32, detected_quad.points[2].y as f32),
-        Point2f::new(detected_quad.points[3].x as f32, detected_quad.points[3].y as f32),
-    ]);
-
-    // 计算目标矩形的四个角点（顺时针，从左上角开始）
-    let target_points = Vector::<Point2f>::from_slice(&[
-        Point2f::new(target_rect.x as f32, target_rect.y as f32),                                    // 左上角
-        Point2f::new((target_rect.x + target_rect.w) as f32, target_rect.y as f32),                 // 右上角
-        Point2f::new((target_rect.x + target_rect.w) as f32, (target_rect.y + target_rect.h) as f32), // 右下角
-        Point2f::new(target_rect.x as f32, (target_rect.y + target_rect.h) as f32),                 // 左下角
-    ]);
+    let src_points = get_points_from_quad(detected_quad);
+    let target_points = get_points_from_coordinate(target_rect);
 
     // 计算透视变换矩阵
     let transform_matrix = imgproc::get_perspective_transform(&src_points, &target_points, 0)
@@ -132,6 +120,29 @@ pub fn get_perspective_transform_matrix(
 
     Ok(transform_matrix)
 }
+
+/// 将四边形转换为OpenCV格式
+pub fn get_points_from_quad(quad: &Quad) -> Vector<Point2f> {
+    // 将检测到的点转换为OpenCV格式
+    let points = Vector::<Point2f>::from_slice(&[
+        Point2f::new(quad.points[0].x as f32, quad.points[0].y as f32),
+        Point2f::new(quad.points[1].x as f32, quad.points[1].y as f32),
+        Point2f::new(quad.points[2].x as f32, quad.points[2].y as f32),
+        Point2f::new(quad.points[3].x as f32, quad.points[3].y as f32),
+    ]);
+    points
+}
+
+pub fn get_points_from_coordinate(coordinate: &Coordinate) -> Vector<Point2f> {
+    let points = Vector::<Point2f>::from_slice(&[
+        Point2f::new(coordinate.x as f32, coordinate.y as f32),                                    // 左上角
+        Point2f::new((coordinate.x + coordinate.w) as f32, coordinate.y as f32),                 // 右上角
+        Point2f::new((coordinate.x + coordinate.w) as f32, (coordinate.y + coordinate.h) as f32), // 右下角
+        Point2f::new(coordinate.x as f32, (coordinate.y + coordinate.h) as f32),                 // 左下角
+    ]);
+    points
+}
+
 
 /// 透视变换
 pub fn pers_trans_image(

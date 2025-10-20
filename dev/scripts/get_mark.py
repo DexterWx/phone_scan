@@ -91,8 +91,14 @@ class MarkDataProcessor:
             page = data["body"]['scanJson']['pages'][0]
             boundary = page['objective_scan_area']
             rec_items = []
-            
+            assist_location = {
+                "left": [],
+                "right": []
+            }
             for block in page['objective_blocks']:
+                if 'assist_location_left_points' in block:
+                    assist_location['left']+=block['assist_location_left_points']
+                    assist_location['right']+=block['assist_location_right_points']
                 for item in block['objective_items']:
                     rec_type = item['options_type']
                     if rec_type not in [1, 3]:
@@ -106,7 +112,8 @@ class MarkDataProcessor:
             
             return {
                 "boundary": boundary,
-                "rec_items": rec_items
+                "rec_items": rec_items,
+                "assist_location": assist_location
             }
         except Exception as e:
             print(f"解析标记数据失败: {e}")
