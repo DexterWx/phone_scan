@@ -154,7 +154,7 @@ def main():
 
     os.makedirs(args.output_dir, exist_ok=True)
     img = load_image(args.image_path)
-    img = preprocess_image(img, resize_width=1500)
+    img = preprocess_image(img, resize_width=2000)
 
     gray, thresh, closed, approx = find_outer_quad(
         img,

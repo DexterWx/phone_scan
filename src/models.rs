@@ -100,7 +100,6 @@ pub struct RecResult {
 pub struct FillItem {
     /// 对应输入的sub_options，true表示选中，false表示未选中
     pub fill_rate: f64,
-    /// 原始坐标信息（仅在调试模式下包含）
     pub coordinate: Coordinate,
 }
 

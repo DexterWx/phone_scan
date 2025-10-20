@@ -1,6 +1,7 @@
 use anyhow::{Ok, Result};
 use opencv::core::{Mat, MatTraitConst};
 use crate::models::{Coordinate, MobileOutput, ProcessedImage, RecType};
+use crate::models::FillItem;
 
 pub struct RecFillModule;
 
@@ -19,8 +20,9 @@ impl RecFillModule {
         let fill_rates = mobile_output.rec_results.iter()
             .flat_map(|rec_result| rec_result.fill_items.iter().map(|item| item.fill_rate))
             .collect::<Vec<f64>>();
-        let thresh = crate::myutils::math::otsu_threshold(&fill_rates);
-        let thresh = (thresh * 100.0).round() / 100.0;
+        let (mut thresh, _) = crate::myutils::math::otsu_threshold(&fill_rates);
+        thresh = (thresh * 100.0).round() / 100.0;
+        // thresh += 0.01;
 
         #[cfg(debug_assertions)]
         {
@@ -28,15 +30,15 @@ impl RecFillModule {
         }
 
         // 3. 单选识别
-        self.rec_single_fill(mobile_output, thresh)?;
+        self.set_single_fill(mobile_output, thresh)?;
         // 4. 多选识别
-        self.rec_multi_fill(mobile_output, thresh)?;
+        self.set_multi_fill(mobile_output, thresh)?;
 
         Ok(())
         
     }
 
-    pub fn rec_multi_fill(&self, mobile_output: &mut MobileOutput, thresh: f64) -> Result<()> {
+    pub fn set_multi_fill(&self, mobile_output: &mut MobileOutput, thresh: f64) -> Result<()> {
         for rec_result in mobile_output.rec_results.iter_mut() {
             if rec_result.rec_tpye != RecType::MultipleChoice {
                 continue;
@@ -54,7 +56,7 @@ impl RecFillModule {
         Ok(())
     }
 
-    pub fn rec_single_fill(&self, mobile_output: &mut MobileOutput, thresh: f64) -> Result<()> {
+    pub fn set_single_fill(&self, mobile_output: &mut MobileOutput, thresh: f64) -> Result<()> {
         for rec_result in mobile_output.rec_results.iter_mut() {
             if rec_result.rec_tpye != RecType::SingleChoice {
                 continue;
@@ -82,11 +84,11 @@ impl RecFillModule {
         Ok(())
     }
 
-    pub fn calculate_all_fill_rate(&self, image: &Mat, mobile_output: &mut MobileOutput) -> Result<()> {
-        for rec_result in &mut mobile_output.rec_results {
+    pub fn calculate_all_fill_rate(&self, integral_image: &Mat, mobile_output: &mut MobileOutput) -> Result<()> {
+        for rec_result in mobile_output.rec_results.iter_mut() {
             let fill_items = &mut rec_result.fill_items;
             for fill_item in fill_items.iter_mut() {
-                let fill_rate = self.calculate_fill_rate(image, &fill_item.coordinate)?;
+                let fill_rate = self.calculate_fill_rate(integral_image, &mut fill_item.coordinate)?;
                 fill_item.fill_rate = fill_rate;
             }
         }
@@ -134,5 +136,64 @@ impl RecFillModule {
         let fill_rate = white_pixels / area;
         
         Ok(fill_rate)
+    }
+
+
+
+
+    fn _calculate_max_fill_rate(&self, integral_image: &Mat, coordinate: &mut Coordinate) -> Result<f64> {
+        let mut max_fill_rate = 0.0;
+        for move_i in -1..=1 {
+            for move_j in 0..=2 {
+                let new_coordinate = Coordinate {
+                    x: coordinate.x + move_i,
+                    y: coordinate.y + move_j,
+                    w: coordinate.w,
+                    h: coordinate.h,
+                };
+                let fill_rate = self.calculate_fill_rate(integral_image, &new_coordinate)?;
+                if fill_rate > max_fill_rate {
+                    max_fill_rate = fill_rate;
+                    coordinate.x = new_coordinate.x;
+                    coordinate.y = new_coordinate.y;
+                }
+            }
+        }
+        Ok(max_fill_rate)
+    }
+
+    fn _fix_fill_coordinates_with_otsu(&self, integral_image: &Mat, fill_items: &mut Vec<FillItem>) -> Result<()> {
+        /// 以当前coordinate为中心的3*3范围内
+        /// 在这9中情况下，分别计算所有coordinate的填涂率
+        /// 每一种情况都用这些填涂率计算一个最大类间方差
+        /// 找到方差最大的一种情况，将当前coordinate的坐标修正为这种情况的坐标
+        /// 并且修改所有coordinate的坐标
+        
+        for move_i in -1..=1 {
+            for move_j in -1..=1 {
+                let mut fill_rates = Vec::new();
+                let mut max_variance = 0.0;
+                let mut new_coors = Vec::new();
+                for fill_item in fill_items.iter_mut() {
+                    let new_coordinate = Coordinate {
+                        x: fill_item.coordinate.x + move_i,
+                        y: fill_item.coordinate.y + move_j,
+                        w: fill_item.coordinate.w,
+                        h: fill_item.coordinate.h,
+                    };
+                    let fill_rate = self.calculate_fill_rate(integral_image, &new_coordinate)?;
+                    fill_rates.push(fill_rate);
+                    new_coors.push(new_coordinate);
+                }
+                let (_thresh, variance) = crate::myutils::math::otsu_threshold(&fill_rates);
+                if variance > max_variance {
+                    max_variance = variance;
+                    for (index, fill_item) in fill_items.iter_mut().enumerate() {
+                        fill_item.coordinate = new_coors[index].clone();
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 }

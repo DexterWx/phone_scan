@@ -66,7 +66,6 @@ pub mod build {
 
     #[no_mangle]
     pub extern "C" fn inference(data_ptr: *const u8, data_len: usize) -> *mut c_char {
-        
         let mut failed_output = MobileOutput {
             code: 1,
             message: "failed".to_string(),
@@ -79,7 +78,7 @@ pub mod build {
                 return CString::new(to_json(&failed_output).unwrap()).unwrap().into_raw();
             }
         }
-        
+
         let image = c_to_mat(data_ptr, data_len);
         if image.is_err() {
             failed_output.message = image.err().unwrap().to_string();

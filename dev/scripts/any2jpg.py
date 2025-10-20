@@ -27,17 +27,66 @@ class ImageConverter:
             return False
     
     @staticmethod
+    def get_exif_orientation(image):
+        """获取EXIF方向信息"""
+        try:
+            if hasattr(image, '_getexif'):
+                exif = image._getexif()
+                if exif is not None:
+                    orientation = exif.get(274)  # Orientation标签
+                    return orientation
+        except (AttributeError, KeyError, TypeError):
+            pass
+        return None
+    
+    @staticmethod
+    def apply_exif_orientation(image):
+        """根据EXIF信息旋转图片"""
+        orientation = ImageConverter.get_exif_orientation(image)
+        
+        if orientation == 1:
+            # 正常方向，不需要旋转
+            return image
+        elif orientation == 2:
+            # 水平翻转
+            return image.transpose(Image.FLIP_LEFT_RIGHT)
+        elif orientation == 3:
+            # 旋转180度
+            return image.rotate(180, expand=True)
+        elif orientation == 4:
+            # 垂直翻转
+            return image.transpose(Image.FLIP_TOP_BOTTOM)
+        elif orientation == 5:
+            # 水平翻转 + 逆时针旋转90度
+            return image.transpose(Image.FLIP_LEFT_RIGHT).rotate(90, expand=True)
+        elif orientation == 6:
+            # 顺时针旋转90度
+            return image.rotate(-90, expand=True)
+        elif orientation == 7:
+            # 水平翻转 + 顺时针旋转90度
+            return image.transpose(Image.FLIP_LEFT_RIGHT).rotate(-90, expand=True)
+        elif orientation == 8:
+            # 逆时针旋转90度
+            return image.rotate(90, expand=True)
+        else:
+            # 未知方向或没有EXIF信息，返回原图
+            return image
+    
+    @staticmethod
     def convert_to_jpg(image_data, output_path):
         """将图片数据转换为JPG格式"""
         try:
             image = Image.open(io.BytesIO(image_data))
             
+            # 应用EXIF方向信息
+            image = ImageConverter.apply_exif_orientation(image)
+            
             # 转换为RGB模式（JPG不支持透明度）
             if image.mode in ('RGBA', 'LA', 'P'):
                 image = image.convert('RGB')
             
-            # 保存为JPG格式
-            image.save(output_path, 'JPEG', quality=95)
+            # 保存为JPG格式，不包含EXIF信息避免重复旋转
+            image.save(output_path, 'JPEG', quality=95, optimize=True)
             return True
         except Exception as e:
             print(f"图片转换失败: {e}")

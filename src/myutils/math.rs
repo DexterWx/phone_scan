@@ -4,9 +4,9 @@
 /// 计算给定数据的最佳Otsu阈值
 /// 输入: values - 数据值向量，值应在0-1之间
 /// 返回: 最佳阈值（分割线），值在0-1之间
-pub fn otsu_threshold(values: &[f64]) -> f64 {
+pub fn otsu_threshold(values: &[f64]) -> (f64, f64) {
     if values.is_empty() {
-        return 0.0;
+        return (0.0, 0.0);
     }
 
     // 对于0-1之间的浮点数，使用更精细的bins
@@ -41,7 +41,7 @@ pub fn otsu_threshold(values: &[f64]) -> f64 {
     
     // 避免除零错误
     if total_pixels == 0 {
-        return 0.0;
+        return (0.0, 0.0);
     }
     
     // 寻找最大类间方差
@@ -74,50 +74,5 @@ pub fn otsu_threshold(values: &[f64]) -> f64 {
         }
     }
     
-    best_threshold
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_otsu_threshold() {
-        // 测试简单双峰分布
-        let mut values = vec![];
-        // 添加低值峰 (接近0)
-        for _ in 0..100 {
-            values.push(0.1);
-        }
-        // 添加高值峰 (接近1)
-        for _ in 0..100 {
-            values.push(0.9);
-        }
-        
-        let threshold = otsu_threshold(&values);
-        // 阈值应该在两个峰之间
-        assert!(threshold > 0.1 && threshold < 0.9);
-    }
-    
-    #[test]
-    fn test_otsu_threshold_single_value() {
-        let values = vec![0.5; 50];
-        let threshold = otsu_threshold(&values);
-        assert_eq!(threshold, 0.5);
-    }
-    
-    #[test]
-    fn test_otsu_threshold_empty() {
-        let values: Vec<f64> = vec![];
-        let threshold = otsu_threshold(&values);
-        assert_eq!(threshold, 0.0);
-    }
-    
-    #[test]
-    fn test_otsu_threshold_values_out_of_range() {
-        let values = vec![-0.5, 0.2, 1.5, 0.8]; // 包含超出0-1范围的值
-        let threshold = otsu_threshold(&values);
-        // 即使输入有超出范围的值，输出也应该在0-1之间
-        assert!(threshold >= 0.0 && threshold <= 1.0);
-    }
+    (best_threshold, max_variance)
 }

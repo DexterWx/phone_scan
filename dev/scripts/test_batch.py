@@ -13,6 +13,7 @@ from test import load_library, setup_function_signatures, read_file_safely, read
 
 
 def get_output_format_from_filename(image_path: str) -> str:
+    return '.bmp'
     """根据文件名自动判断输出格式"""
     file_ext = os.path.splitext(image_path)[1].lower()
     
@@ -103,7 +104,9 @@ def process_single_image(lib, image_path: str, quality: int = 95, resize_width: 
         image_array = (c_uint8 * len(image_data)).from_buffer_copy(image_data)
         
         # 调用推理
+        start_time = time.time()
         infer_result_ptr = lib.inference(image_array, len(image_data))
+        elapsed_time = time.time() - start_time
         
         if not infer_result_ptr:
             return {"error": "Inference returned null pointer"}
@@ -115,7 +118,7 @@ def process_single_image(lib, image_path: str, quality: int = 95, resize_width: 
         # 释放内存
         lib.free_string(infer_result_ptr)
         
-        return infer_result
+        return {"result": infer_result, "elapsed_time": elapsed_time}
         
     except Exception as e:
         return {"error": str(e)}
@@ -142,9 +145,7 @@ def process_directory(lib, input_dir: str, output_dir: str, subdir_name: str, qu
         image_name = os.path.basename(image_path)
         image_stem = os.path.splitext(image_name)[0]
         
-        start_time = time.time()
         result = process_single_image(lib, image_path, quality, resize_width)
-        elapsed_time = time.time() - start_time
         
         # 保存结果
         output_filename = f"{subdir_name}_{image_stem}.json"
@@ -154,9 +155,9 @@ def process_directory(lib, input_dir: str, output_dir: str, subdir_name: str, qu
         result_with_meta = {
             "image_path": image_path,
             "image_name": image_name,
-            "processing_time": elapsed_time,
+            "processing_time": result['elapsed_time'],
             "timestamp": time.time(),
-            "result": result
+            "result": result['result']
         }
         
         try:
