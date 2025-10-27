@@ -15,7 +15,7 @@ mod tests {
 
     #[test]
     fn test_demo() -> Result<()> {
-        let scan_id = "1";
+        let scan_id = "2";
         let scan_path = format!("dev/test_data/cards/{scan_id}/test.json");
         let img_path = format!("dev/test_data/cards/{scan_id}/test.jpg");
         let image = imread(&img_path, opencv::imgcodecs::IMREAD_COLOR)?;

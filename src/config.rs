@@ -25,7 +25,7 @@ impl ImageProcessingConfig {
     pub const EPSILON_FACTOR: f64 = 0.015;
     
     /// 最小面积占比
-    pub const MIN_AREA_RATIO: f64 = 0.4;
+    pub const MIN_AREA_RATIO: f64 = 0.3;
     
     /// 边界惩罚系数
     pub const MARGIN_PENALTY: f64 = 50.0;

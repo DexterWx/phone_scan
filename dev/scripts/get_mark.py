@@ -109,6 +109,11 @@ class MarkDataProcessor:
                         "rec_type": rec_type,
                         "sub_options": sub_options
                     })
+            for number in page['exam_number']['numbers']:
+                rec_items.append({
+                    "rec_type": 1,
+                    "sub_options": number
+                })
             
             return {
                 "boundary": boundary,
