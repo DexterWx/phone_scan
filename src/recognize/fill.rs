@@ -30,10 +30,12 @@ impl RecFillModule {
             println!("填涂率阈值: {:.4}", thresh);
         }
 
-        // 3. 单选识别
-        self.set_single_fill(mobile_output, thresh)?;
-        // 4. 多选识别
-        self.set_multi_fill(mobile_output, thresh)?;
+        // // 3. 单选识别
+        // self.set_single_fill(mobile_output, thresh)?;
+        // // 4. 多选识别
+        // self.set_multi_fill(mobile_output, thresh)?;
+        self.set_default_fill(mobile_output, thresh)?;
+        
 
         Ok(())
         
@@ -42,6 +44,24 @@ impl RecFillModule {
     pub fn set_multi_fill(&self, mobile_output: &mut MobileOutput, thresh: f64) -> Result<()> {
         for rec_result in mobile_output.rec_results.iter_mut() {
             if rec_result.rec_tpye != RecType::MultipleChoice {
+                continue;
+            }
+            let fill_items = &mut rec_result.fill_items;
+            for (index,fill_item) in fill_items.iter_mut().enumerate() {
+                if fill_item.fill_rate > thresh {
+                    rec_result.rec_result[index] = true;
+                } else {
+                    rec_result.rec_result[index] = false;
+                }
+            }
+        }
+        
+        Ok(())
+    }
+
+    pub fn set_default_fill(&self, mobile_output: &mut MobileOutput, thresh: f64) -> Result<()> {
+        for rec_result in mobile_output.rec_results.iter_mut() {
+            if rec_result.rec_tpye != RecType::MultipleChoice && rec_result.rec_tpye != RecType::SingleChoice{
                 continue;
             }
             let fill_items = &mut rec_result.fill_items;
