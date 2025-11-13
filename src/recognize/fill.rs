@@ -17,12 +17,13 @@ impl RecFillModule {
         let integral_image = crate::myutils::image::integral_image(&process_image.thresh)?;
 
         // 2. 计算所有选项的填涂率和otsu值
+        self.refine_all_fill_coordinate(&integral_image, mobile_output)?;
         self.calculate_all_fill_rate(&integral_image, mobile_output)?;
         let fill_rates = mobile_output.rec_results.iter()
             .flat_map(|rec_result| rec_result.fill_items.iter().map(|item| item.fill_rate))
             .collect::<Vec<f64>>();
         let (mut thresh, _) = crate::myutils::math::otsu_threshold(&fill_rates);
-        thresh = thresh.max(FillConfig::FILL_RATE_MIN);
+        thresh = thresh.min(FillConfig::FILL_RATE_MIN);
         thresh = (thresh * 100.0).round() / 100.0;
 
         #[cfg(debug_assertions)]
@@ -117,6 +118,67 @@ impl RecFillModule {
         Ok(())
     }
 
+    pub fn refine_all_fill_coordinate(&self, integral_image: &Mat, mobile_output: &mut MobileOutput) -> Result<()> {
+        for rec_result in mobile_output.rec_results.iter_mut() {
+            let res = self.refine_items_fill_coordinate(integral_image, &mut rec_result.fill_items);
+            if res.is_err() {
+                continue;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// 通过Otsu最大类间方差优化坐标位置
+    /// 在以当前坐标为中心的4x4范围内(-2到2)寻找使所有选项填涂率方差最大的位置
+    fn refine_items_fill_coordinate(&self, integral_image: &Mat, fill_items: &mut Vec<FillItem>) -> Result<()> {
+        if fill_items.is_empty() {
+            return Ok(());
+        }
+
+        let mut max_variance = 0.0;
+        let mut best_coordinates: Vec<Coordinate> = Vec::new();
+
+        // 在-2到2的范围内搜索最优坐标偏移
+        for dx in -FillConfig::REFINE_COOR_RANGE ..= FillConfig::REFINE_COOR_RANGE{
+            for dy in -FillConfig::REFINE_COOR_RANGE ..= FillConfig::REFINE_COOR_RANGE {
+                let mut fill_rates = Vec::new();
+                let mut temp_coordinates = Vec::new();
+                
+                // 计算所有选项在这个偏移下的填涂率
+                for fill_item in fill_items.iter() {
+                    let new_coordinate = Coordinate {
+                        x: fill_item.coordinate.x + dx,
+                        y: fill_item.coordinate.y + dy,
+                        w: fill_item.coordinate.w,
+                        h: fill_item.coordinate.h,
+                    };
+                    
+                    // 计算填涂率并处理可能的错误
+                    let fill_rate_result = calculate_fill_rate(integral_image, &new_coordinate)?;
+                    fill_rates.push(fill_rate_result);
+                    temp_coordinates.push(new_coordinate);
+                }
+                
+                let (_, variance) = crate::myutils::math::otsu_threshold(&fill_rates);
+                // 更新最优坐标（如果方差更大）
+                if variance > max_variance {
+                    max_variance = variance;
+                    best_coordinates = temp_coordinates;
+                }
+            }
+        }
+
+        // 如果找到了更好的坐标，则更新坐标
+        if max_variance > 0.0 {
+            for (i, fill_item) in fill_items.iter_mut().enumerate() {
+                fill_item.coordinate = best_coordinates[i].clone();
+            }
+        }
+
+        Ok(())
+    }
+
     fn _calculate_max_fill_rate(&self, integral_image: &Mat, coordinate: &mut Coordinate) -> Result<f64> {
         let mut max_fill_rate = 0.0;
         for move_i in -1..=1 {
@@ -136,41 +198,6 @@ impl RecFillModule {
             }
         }
         Ok(max_fill_rate)
-    }
-
-    fn _fix_fill_coordinates_with_otsu(&self, integral_image: &Mat, fill_items: &mut Vec<FillItem>) -> Result<()> {
-        /// 以当前coordinate为中心的3*3范围内
-        /// 在这9中情况下，分别计算所有coordinate的填涂率
-        /// 每一种情况都用这些填涂率计算一个最大类间方差
-        /// 找到方差最大的一种情况，将当前coordinate的坐标修正为这种情况的坐标
-        /// 并且修改所有coordinate的坐标
-        
-        for move_i in -1..=1 {
-            for move_j in -1..=1 {
-                let mut fill_rates = Vec::new();
-                let mut max_variance = 0.0;
-                let mut new_coors = Vec::new();
-                for fill_item in fill_items.iter_mut() {
-                    let new_coordinate = Coordinate {
-                        x: fill_item.coordinate.x + move_i,
-                        y: fill_item.coordinate.y + move_j,
-                        w: fill_item.coordinate.w,
-                        h: fill_item.coordinate.h,
-                    };
-                    let fill_rate = calculate_fill_rate(integral_image, &new_coordinate)?;
-                    fill_rates.push(fill_rate);
-                    new_coors.push(new_coordinate);
-                }
-                let (_thresh, variance) = crate::myutils::math::otsu_threshold(&fill_rates);
-                if variance > max_variance {
-                    max_variance = variance;
-                    for (index, fill_item) in fill_items.iter_mut().enumerate() {
-                        fill_item.coordinate = new_coors[index].clone();
-                    }
-                }
-            }
-        }
-        Ok(())
     }
 }
 
