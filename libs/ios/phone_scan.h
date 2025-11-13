@@ -41,7 +41,7 @@
 /**
  * 最小面积占比
  */
-#define ImageProcessingConfig_MIN_AREA_RATIO 0.3
+#define ImageProcessingConfig_MIN_AREA_RATIO 0.25
 
 /**
  * 边界惩罚系数
@@ -65,7 +65,9 @@
 
 #define AssistLocationConfig_ASSIST_POINT_WHDIFF_MAX 2
 
-#define FillConfig_FILL_RATE_MIN 0.5
+#define FillConfig_FILL_RATE_MIN 0.45
+
+#define FillConfig_REFINE_COOR_RANGE 2
 
 char *initialize(const char *mark_ptr);
 

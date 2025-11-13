@@ -23,7 +23,7 @@ impl RecFillModule {
             .flat_map(|rec_result| rec_result.fill_items.iter().map(|item| item.fill_rate))
             .collect::<Vec<f64>>();
         let (mut thresh, _) = crate::myutils::math::otsu_threshold(&fill_rates);
-        thresh = thresh.min(FillConfig::FILL_RATE_MIN);
+        thresh = thresh.max(FillConfig::FILL_RATE_MIN);
         thresh = (thresh * 100.0).round() / 100.0;
 
         #[cfg(debug_assertions)]
