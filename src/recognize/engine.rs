@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use opencv::core::Mat;
+use opencv::core::{Mat, MatTraitConst};
 use crate::models::{Mark, MobileOutput};
 use crate::myutils::image::{get_perspective_transform_matrix_with_boundary, get_perspective_transform_matrix_with_assists, pers_trans_image, process_image};
 use crate::myutils::myjson::from_json;
@@ -30,6 +30,8 @@ impl RecEngine {
     }
 
     pub fn inference(&self, image: &Mat) -> Result<MobileOutput> {
+        println!("RUST INFO: 开始识别...");
+        println!("RUST INFO: 图像尺寸: {} x {}", image.cols(), image.rows());
         // 1. 初始化输出
         let mut mobile_output = MobileOutput::new(&self.mark);
         // 2. 处理图片
@@ -58,7 +60,7 @@ impl RecEngine {
         )?;
         // 9. 填涂识别
         self.rec_fill_module.infer(&baizheng, &mut mobile_output)?;
-
+        println!("RUST INFO: 识别完成！");
 
         // 渲染
         #[cfg(debug_assertions)]
