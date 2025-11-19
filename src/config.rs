@@ -46,6 +46,6 @@ impl AssistLocationConfig {
 
 pub struct FillConfig;
 impl FillConfig {
-    pub const FILL_RATE_MIN: f64 = 0.44;
+    pub const FILL_RATE_MIN: f64 = 0.45;
     pub const REFINE_COOR_RANGE: i32 = 2;
 }

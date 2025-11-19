@@ -24,8 +24,8 @@ impl RecFillModule {
             .collect::<Vec<f64>>();
         let (mut thresh, _) = crate::myutils::math::otsu_threshold(&fill_rates);
         thresh = thresh.max(FillConfig::FILL_RATE_MIN);
-        thresh = (thresh * 100.0).round() / 100.0;
-
+        thresh = (thresh * 100.0).ceil() / 100.0;
+        
         #[cfg(debug_assertions)]
         {
             println!("填涂率阈值: {:.4}", thresh);
