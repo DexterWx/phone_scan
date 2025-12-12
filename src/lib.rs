@@ -22,8 +22,25 @@ mod tests {
 
         let scan_string = fs::read_to_string(scan_path)?;
 
-        let engine = engine::RecEngine::new(&scan_string)?;
-        let res = engine.inference(&image)?;
+        let engine = engine::RecEngine::new_single(&scan_string)?;
+        let res = engine.inference_single(&image)?;
+
+        fs::write(format!("dev/test_data/out/{scan_id}.json"), to_json(&res)?)?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_paper() -> Result<()> {
+        let scan_id = "13498";
+        let scan_path = format!("dev/test_data/cards/{scan_id}/test.json");
+        let img_path = format!("dev/test_data/cards/{scan_id}/test.jpg");
+        let image = imread(&img_path, opencv::imgcodecs::IMREAD_COLOR)?;
+
+        let scan_string = fs::read_to_string(scan_path)?;
+
+        let engine = engine::RecEngine::new_paper(&scan_string)?;
+        let res = engine.inference_paper(&image)?;
 
         fs::write(format!("dev/test_data/out/{scan_id}.json"), to_json(&res)?)?;
 
@@ -42,7 +59,7 @@ pub mod build {
     pub extern "C" fn initialize(mark_ptr: *const c_char) -> *mut c_char{
         let mark_str = c_to_string(mark_ptr);
 
-        let engine = RecEngine::new(&mark_str);
+        let engine = RecEngine::new_single(&mark_str);
         
         let mut res = InitInfo {
             code: 0,
@@ -69,6 +86,7 @@ pub mod build {
         let mut failed_output = MobileOutput {
             code: 1,
             message: "failed".to_string(),
+            page_number: 0,
             rec_results: vec![],
         };
 
@@ -87,7 +105,7 @@ pub mod build {
 
         unsafe {
             let engine = ENGINE.as_ref().unwrap();
-            let success_output = engine.inference(&image.unwrap());
+            let success_output = engine.inference_single(&image.unwrap());
             if success_output.is_err() {
                 failed_output.message = success_output.err().unwrap().to_string();
                 return CString::new(to_json(&failed_output).unwrap()).unwrap().into_raw();

@@ -125,6 +125,60 @@ class MarkDataProcessor:
             return None
 
 
+    @staticmethod
+    def parse_paper_data(data):
+        """解析标记数据"""
+        try:
+            boundary = data["body"]['scanJson']['pages'][0]['objective_scan_area']
+            pages = []
+            for index,page in enumerate(data["body"]['scanJson']['pages']):
+                rec_items = []
+                assist_location = {
+                    "left": [],
+                    "right": []
+                }
+                for block in page['objective_blocks']:
+                    if 'assist_location_left_points' in block:
+                        assist_location['left']+=block['assist_location_left_points']
+                        assist_location['right']+=block['assist_location_right_points']
+                    for item in block['objective_items']:
+                        rec_type = item['options_type']
+                        if rec_type not in [1, 3]:
+                            continue
+                        rec_type = 1 if rec_type == 1 else 2
+                        sub_options = item['options']
+                        rec_items.append({
+                            "rec_type": rec_type,
+                            "sub_options": sub_options
+                        })
+                if index==0:
+                    for number in page['exam_number']['numbers']:
+                        rec_items.append({
+                            "rec_type": 1,
+                            "sub_options": number
+                        })
+                
+                assist_location['left']+=page['rect_assist_locations']['rect_assist_location_left_points']
+                assist_location['right']+=page['rect_assist_locations']['rect_assist_location_right_points']
+                
+                pages.append(
+                    {
+                        "rec_items": rec_items,
+                        "assist_location": assist_location
+                    }
+                )
+            
+            
+            return {
+                "boundary": boundary,
+                "page_number": data["body"]['scanJson']['pages'][0]['page_number_points'],
+                "pages": pages
+            }
+        except Exception as e:
+            print(f"解析标记数据失败: {e}")
+            return None
+
+
 class FileManager:
     """文件管理模块"""
     
@@ -166,13 +220,14 @@ class FileManager:
 
 if __name__ == "__main__":
     """主函数"""
-    if len(sys.argv) != 4:
-        print("用法: python get_mark.py <mark_url> <img_path> <output_dir>")
+    if len(sys.argv) != 5:
+        print("用法: python get_mark.py <mark_url> <img_path> <output_dir> <true>")
         sys.exit(1)
     
     mark_url = sys.argv[1]
     img_path = sys.argv[2]
     output_dir = sys.argv[3]
+    is_paper = sys.argv[4].lower() == 'true'
     
     # 创建输出目录
     if not FileManager.create_output_dir(output_dir):
@@ -181,7 +236,7 @@ if __name__ == "__main__":
     # 获取并解析标记数据
     data = MarkDataProcessor.fetch_mark_data(mark_url)
     
-    mark = MarkDataProcessor.parse_mark_data(data)
+    mark = MarkDataProcessor.parse_mark_data(data) if not is_paper else MarkDataProcessor.parse_paper_data(data)
     
     # 保存JSON数据
     FileManager.save_json(mark, output_dir)

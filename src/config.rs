@@ -10,7 +10,11 @@ impl ImageProcessingConfig {
     pub const GAUSSIAN_SIGMA: f64 = 0.0;
 
     /// 统一输入图像的宽度
-    pub const TARGET_WIDTH: i32 = 2400;
+    pub const TARGET_WIDTH_A4: i32 = 2400;
+    pub const TARGET_WIDTH_A3: i32 = 4000;
+
+    /// 目标图片缩放比例
+    pub const PAPER_SCAN_TARGET_SCALE: f64 = 2.0;
 
     /// 自适应阈值的块大小
     pub const BLOCK_SIZE: i32 = 51;
@@ -31,17 +35,38 @@ impl ImageProcessingConfig {
     pub const MARGIN_PENALTY: f64 = 50.0;
 }
 
+/// 辅助定位点的寻找
+pub trait AssistLocationConfig {
+    fn assist_area_extend_size() -> i32;
+    fn assist_point_min_size() -> i32;
+    fn assist_point_max_size() -> i32;
+    fn assist_point_min_area() -> f64;
+    fn assist_point_max_area() -> f64;
+    fn assist_point_min_fill_ratio() -> f64;
+    fn assist_point_whdiff_max() -> i32;
+}
 
-pub struct AssistLocationConfig;
-impl AssistLocationConfig {
-    pub const ASSIST_AREA_EXTEND_SIZE: i32 = 6;
-    /// 辅助定位点的标准大小
-    pub const ASSIST_POINT_MIN_SIZE: i32 = 4;
-    pub const ASSIST_POINT_MAX_SIZE: i32 = 9;
-    pub const ASSIST_POINT_MIN_AREA: f64 = 20.0;
-    pub const ASSIST_POINT_MAX_AREA: f64 = 70.0;
-    pub const ASSIST_POINT_MIN_FILL_RATIO: f64 = 0.9;
-    pub const ASSIST_POINT_WHDIFF_MAX: i32 = 2;
+
+pub struct AssistLocationSingleConfig;
+impl AssistLocationConfig for AssistLocationSingleConfig {
+    fn assist_area_extend_size() -> i32 { 6 }
+    fn assist_point_min_size() -> i32 { 4 }
+    fn assist_point_max_size() -> i32 { 9 }
+    fn assist_point_min_area() -> f64 { 20.0 }
+    fn assist_point_max_area() -> f64 { 70.0 }
+    fn assist_point_min_fill_ratio() -> f64 { 0.9 }
+    fn assist_point_whdiff_max() -> i32 { 2 }
+}
+
+pub struct AssistLocationPageConfig;
+impl AssistLocationConfig for AssistLocationPageConfig {
+    fn assist_area_extend_size() -> i32 { 25 }
+    fn assist_point_min_size() -> i32 { 10 }
+    fn assist_point_max_size() -> i32 { 20 }
+    fn assist_point_min_area() -> f64 { 180.0 }
+    fn assist_point_max_area() -> f64 { 260.0 }
+    fn assist_point_min_fill_ratio() -> f64 { 0.9 }
+    fn assist_point_whdiff_max() -> i32 { 4 }
 }
 
 pub struct FillConfig;

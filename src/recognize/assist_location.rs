@@ -1,8 +1,12 @@
+use crate::config::AssistLocationConfig;
+use crate::config::AssistLocationPageConfig;
 use crate::models::Coordinate;
 use crate::models::AssistLocation;
 use crate::models::ProcessedImage;
 use crate::myutils::image::merge_coordinates;
-use crate::config::AssistLocationConfig;
+use crate::config::AssistLocationSingleConfig;
+use crate::recognize::location;
+use anyhow::Ok;
 use anyhow::Result;
 use opencv::core::Mat;
 use opencv::core::MatTraitConst;
@@ -18,18 +22,22 @@ impl AssistLocationModule {
         Self
     }
 
-    pub fn infer(&self, processed_image: &ProcessedImage, assist_location: &AssistLocation) -> Result<AssistLocation> {
-        let left_area = merge_coordinates(&assist_location.left, AssistLocationConfig::ASSIST_AREA_EXTEND_SIZE);
-        let right_area = merge_coordinates(&assist_location.right, AssistLocationConfig::ASSIST_AREA_EXTEND_SIZE);
-        let left_src_assist = Self::find_assist_location(&processed_image.closed, &left_area)?;
-        let right_src_assist = Self::find_assist_location(&processed_image.closed, &right_area)?;
-        
+    pub fn infer_single<T: AssistLocationConfig>(
+        &self, processed_image: &ProcessedImage,
+        assist_location: &AssistLocation
+    ) -> Result<AssistLocation> {
+        let left_area = merge_coordinates(&assist_location.left, T::assist_area_extend_size());
+        let right_area = merge_coordinates(&assist_location.right, T::assist_area_extend_size());
+        let left_src_assist = Self::find_assist_location::<T>(&processed_image.closed, &left_area)?;
+        let right_src_assist = Self::find_assist_location::<T>(&processed_image.closed, &right_area)?;
+        println!("找到辅助定位点，左侧{:?}，右侧{:?}", left_src_assist, right_src_assist);
+
         if left_src_assist.len() != right_src_assist.len() {
             anyhow::bail!("辅助定位点数量不匹配，左侧找到{}个，右侧找到{}个", left_src_assist.len(), right_src_assist.len());
         }
 
         if left_src_assist.len() != assist_location.left.len() {
-            anyhow::bail!("辅助定位点数量异常");
+            anyhow::bail!("辅助定位点数量异常: {:?}_{}", left_src_assist.len(), assist_location.left.len(),);
         }
 
         Ok(
@@ -40,13 +48,19 @@ impl AssistLocationModule {
         )
     }
 
-    // pub fn align_assist_location(&self, processed_image: &ProcessedImage, coordinates: &Vec<Coordinate>) -> Result<AssistLocation> {
-        
-    //     todo!()
-    // }
+    pub fn infer_paper(&self, processed_image: &ProcessedImage, assist_location: &AssistLocation) -> Result<AssistLocation> {
+        let mut assist_locations = Vec::new();
+        let split_locations = assist_location.split();
+        for single_location in split_locations {
+            let real_single_location = self.infer_single::<AssistLocationPageConfig>(processed_image, &single_location)?;
+            assist_locations.push(real_single_location);
+        }
+        let res = AssistLocation::merge(&assist_locations);
+        Ok(res)
+    }
 
     /// 在闭图上寻找辅助定位点
-    pub fn find_assist_location(closed: &Mat, coordinate: &Coordinate) -> Result<Vec<Coordinate>> {
+    pub fn find_assist_location<T: AssistLocationConfig>(closed: &Mat, coordinate: &Coordinate) -> Result<Vec<Coordinate>> {
         // 创建感兴趣区域ROI
         let roi_rect = Rect::new(
             coordinate.x.max(0),
@@ -73,23 +87,23 @@ impl AssistLocationModule {
         // 遍历所有轮廓
         for i in 0..contours.len() {
             let contour = contours.get(i)?;
-            let area = contour_area(&contour, false)?;
+            // let area = contour_area(&contour, false)?;
             
             // 计算轮廓的边界矩形
             let bounding_rect = bounding_rect(&contour)?;
-            
             // 检查区域是否接近6*6的正方形
             // 允许一定误差，比如5-7像素范围内
             let width = bounding_rect.width;
             let height = bounding_rect.height;
+            let area = (width * height) as f64;
             
-            if width < AssistLocationConfig::ASSIST_POINT_MIN_SIZE {continue;}
-            if width > AssistLocationConfig::ASSIST_POINT_MAX_SIZE {continue;}
-            if height < AssistLocationConfig::ASSIST_POINT_MIN_SIZE {continue;}
-            if height > AssistLocationConfig::ASSIST_POINT_MAX_SIZE {continue;}
-            if (width - height).abs() > AssistLocationConfig::ASSIST_POINT_WHDIFF_MAX {continue;}
-            if area < AssistLocationConfig::ASSIST_POINT_MIN_AREA {continue;}
-            if area > AssistLocationConfig::ASSIST_POINT_MAX_AREA {continue;}
+            if width < T::assist_point_min_size() {continue;}
+            if width > T::assist_point_max_size() {continue;}
+            if height < T::assist_point_min_size() {continue;}
+            if height > T::assist_point_max_size() {continue;}
+            if (width - height).abs() > T::assist_point_whdiff_max() {continue;}
+            if area < T::assist_point_min_area() {continue;}
+            if area > T::assist_point_max_area() {continue;}
             let fill_rate = crate::recognize::fill::calculate_fill_rate(
                 &integral_image,
                 &Coordinate {
@@ -99,8 +113,7 @@ impl AssistLocationModule {
                     h: bounding_rect.height-2,
                 }
             )?;
-            if fill_rate < AssistLocationConfig::ASSIST_POINT_MIN_FILL_RATIO {continue;}
-
+            if fill_rate < T::assist_point_min_fill_ratio() {continue;}
             assist_points.push(Coordinate {
                 x: bounding_rect.x + coordinate.x,
                 y: bounding_rect.y + coordinate.y,

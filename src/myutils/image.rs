@@ -54,9 +54,9 @@ pub fn resize_image(image: &Mat, target_width: i32) -> Result<Mat> {
 }
 
 /// 图片预处理：灰度化、高斯模糊、二值化、形态学操作
-pub fn process_image(image: &Mat) -> Result<ProcessedImage> {
+pub fn process_image(image: &Mat, target_width: i32) -> Result<ProcessedImage> {
     // 0. 图片统一到宽度
-    let resized = resize_image(image, ImageProcessingConfig::TARGET_WIDTH)?;
+    let resized = resize_image(image, target_width)?;
 
     // 1. 灰度化
     let mut gray = Mat::default();
@@ -98,6 +98,7 @@ pub fn process_image(image: &Mat) -> Result<ProcessedImage> {
     )?;
 
     Ok(ProcessedImage {
+        rgb: resized,
         gray,
         thresh,
         closed,
@@ -189,6 +190,17 @@ pub fn pers_trans_image(
     target_h: i32
 ) -> Result<ProcessedImage> {
     // 对所有图像应用透视变换
+    let mut rgb_warped = Mat::default();
+    imgproc::warp_perspective(
+        &processed_image.rgb,
+        &mut rgb_warped,
+        &transform_matrix,
+        Size::new(target_w, target_h),
+        imgproc::INTER_LINEAR,
+        opencv::core::BORDER_CONSTANT,
+        opencv::core::Scalar::default(),
+    ).context("应用透视变换到RGB图失败")?;
+
     let mut gray_warped = Mat::default();
     imgproc::warp_perspective(
         &processed_image.gray,
@@ -223,6 +235,7 @@ pub fn pers_trans_image(
     ).context("应用透视变换到形态学处理图失败")?;
 
     Ok(ProcessedImage {
+        rgb: rgb_warped,
         gray: gray_warped,
         thresh: thresh_warped,
         closed: closed_warped,
