@@ -151,12 +151,21 @@ class MarkDataProcessor:
                             "rec_type": rec_type,
                             "sub_options": sub_options
                         })
+                for item in page['subjective_items']:
+                    sub_options = item['score_rects']
+                    rec_items.append({
+                        "rec_type": 3,
+                        "sub_options": sub_options
+                    })
                 if index==0:
                     for number in page['exam_number']['numbers']:
                         rec_items.append({
                             "rec_type": 1,
                             "sub_options": number
                         })
+                    assist_location['left']=page['exam_number']['exam_location_left_points'] + assist_location['left']
+                    assist_location['right']=page['exam_number']['exam_location_right_points'] + assist_location['right']
+                    
                 
                 assist_location['left']+=page['rect_assist_locations']['rect_assist_location_left_points']
                 assist_location['right']+=page['rect_assist_locations']['rect_assist_location_right_points']

@@ -45,10 +45,20 @@ def setup_function_signatures(lib):
     lib.inference.argtypes = [POINTER(c_uint8), c_size_t]
     lib.inference.restype = POINTER(c_char)  # ✅ 改成裸指针
 
+    # Rust: pub extern "C" fn initialize(config_json: *const c_char) -> *mut c_char
+    lib.initialize_paper.argtypes = [c_char_p]
+    lib.initialize_paper.restype = POINTER(c_char)  # ✅ 改成裸指针
+
+    # Rust: pub extern "C" fn inference(image_data: *const u8, len: usize) -> *mut c_char
+    lib.inference_paper.argtypes = [POINTER(c_uint8), c_size_t]
+    lib.inference_paper.restype = POINTER(c_char)  # ✅ 改成裸指针
+
     # Rust: pub extern "C" fn free_string(s: *mut c_char)
     lib.free_string.argtypes = [POINTER(c_char)]  # ✅ 改成裸指针
     lib.free_string.restype = None
 
+    lib.destroy_engine.argtypes = None
+    lib.destroy_engine.restype = None
 
 def read_file_safely(file_path: str) -> str:
     if not os.path.exists(file_path):
@@ -177,8 +187,8 @@ def get_platform_specific_example():
 
 
 def main():
-    if len(sys.argv) < 4 or len(sys.argv) > 7:
-        print("Usage: python test.py <library_path> <init_json_file> <image_file> [output_format] [quality] [resize_width]")
+    if len(sys.argv) < 5 or len(sys.argv) > 8:
+        print("Usage: python test.py <library_path> <init_json_file> <image_file> <use_paper> [output_format] [quality] [resize_width]")
         print("  image_file: supports .jpg, .png, .bmp, .heic, .heif")
         print("  output_format: .jpg, .png, .bmp (default: .jpg)")
         print("  quality: JPEG quality 1-100 (default: 95)")
@@ -190,11 +200,12 @@ def main():
     library_path = sys.argv[1]
     init_json_file = sys.argv[2]
     image_file = sys.argv[3]
+    use_paper = sys.argv[4].lower() == 'paper'
     
     # 可选参数
-    output_format = sys.argv[4] if len(sys.argv) > 4 else '.jpg'
-    quality = int(sys.argv[5]) if len(sys.argv) > 5 else 95
-    resize_width = int(sys.argv[6]) if len(sys.argv) > 6 else None
+    output_format = sys.argv[5] if len(sys.argv) > 4 else '.jpg'
+    quality = int(sys.argv[6]) if len(sys.argv) > 5 else 95
+    resize_width = int(sys.argv[7]) if len(sys.argv) > 6 else None
 
     try:
         lib = load_library(library_path)
@@ -202,7 +213,10 @@ def main():
 
         # 初始化
         init_json_content = read_file_safely(init_json_file)
-        init_result_ptr = lib.initialize(init_json_content.encode('utf-8'))
+        if use_paper:
+            init_result_ptr = lib.initialize_paper(init_json_content.encode('utf-8'))
+        else:
+            init_result_ptr = lib.initialize(init_json_content.encode('utf-8'))
 
         if not init_result_ptr:
             raise RuntimeError("Initialize returned null pointer")
@@ -220,7 +234,10 @@ def main():
         image_array = (c_uint8 * len(image_data)).from_buffer_copy(image_data)
 
         start_time = time.time()
-        infer_result_ptr = lib.inference(image_array, len(image_data))
+        if use_paper:
+            infer_result_ptr = lib.inference_paper(image_array, len(image_data))
+        else:
+            infer_result_ptr = lib.inference(image_array, len(image_data))
         print(f"✅ Inference completed in {time.time() - start_time:.3f}s")
 
         if not infer_result_ptr:
@@ -233,6 +250,8 @@ def main():
 
         if infer_result.get('code') != 0:
             raise RuntimeError(f"Inference failed: {infer_result.get('message')}")
+        lib.destroy_engine()
+        print(f"✅ Engine destroyed")
 
     except Exception as e:
         print(f"❌ Error: {e}")

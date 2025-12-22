@@ -31,9 +31,9 @@ def extract_red_marks(image):
     
     # 定义红色的HSV范围
     # 红色在HSV圆环上位于0度附近，需要定义两个范围来覆盖所有红色
-    lower_red1 = np.array([0, 25, 50])
+    lower_red1 = np.array([0, 20, 50])
     upper_red1 = np.array([10, 255, 255])
-    lower_red2 = np.array([170, 25, 50])
+    lower_red2 = np.array([170, 20, 50])
     upper_red2 = np.array([180, 255, 255])
     
     # 创建红色掩码

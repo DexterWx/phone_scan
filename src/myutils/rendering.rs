@@ -195,7 +195,7 @@ pub fn render_output(
     // 遍历所有识别结果
     for rec_result in &mobile_output.rec_results {
         // 遍历所有填涂项和对应的结果
-        for (index, fill_item) in rec_result.fill_items.iter().enumerate() {
+        for (index, fill_item) in rec_result.rec_options.iter().enumerate() {
             // 根据缩放调整坐标
             let scaled_coord = Coordinate {
                 x: (fill_item.coordinate.x as f64 * scale) as i32,
@@ -205,9 +205,13 @@ pub fn render_output(
             };
             
             // 只有在rec_result为true时才绘制矩形框
-            if index < rec_result.rec_result.len() && rec_result.rec_result[index] {
+            if rec_result.rec_result[index] {
                 // 渲染选中选项的坐标框
                 render_coordinate(image, &scaled_coord, Some(mode), Some(color), Some(thickness))?;
+            }
+
+            if rec_result.rec_type == crate::models::RecType::Vx {
+                continue; // 只在填涂识别结果上渲染填涂率
             }
             
             // 在选项上方渲染填涂率数字（保留两位小数）

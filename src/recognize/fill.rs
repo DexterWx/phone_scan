@@ -2,7 +2,8 @@ use anyhow::{Ok, Result};
 use opencv::core::{Mat, MatTraitConst};
 use crate::config::FillConfig;
 use crate::models::{Coordinate, MobileOutput, ProcessedImage, RecType};
-use crate::models::FillItem;
+use crate::models::RecOption;
+use crate::myutils::image::sum_pixel;
 
 pub struct RecFillModule;
 
@@ -12,18 +13,19 @@ impl RecFillModule {
         Self
     }
 
-    pub fn infer(&self, process_image: &ProcessedImage, mobile_output: &mut MobileOutput) -> Result<()> {
+    pub fn infer<T: FillConfig>(&self, process_image: &ProcessedImage, mobile_output: &mut MobileOutput, ) -> Result<()> {
         // 1. 计算积分图
         let integral_image = crate::myutils::image::integral_image(&process_image.thresh)?;
 
         // 2. 计算所有选项的填涂率和otsu值
-        self.refine_all_fill_coordinate(&integral_image, mobile_output)?;
+        self.refine_all_fill_coordinate::<T>(&integral_image, mobile_output)?;
         self.calculate_all_fill_rate(&integral_image, mobile_output)?;
         let fill_rates = mobile_output.rec_results.iter()
-            .flat_map(|rec_result| rec_result.fill_items.iter().map(|item| item.fill_rate))
+            .filter(|rec_result| rec_result.rec_type != RecType::Vx)
+            .flat_map(|rec_result| rec_result.rec_options.iter().map(|item| item.fill_rate))
             .collect::<Vec<f64>>();
         let (mut thresh, _) = crate::myutils::math::otsu_threshold(&fill_rates);
-        thresh = thresh.max(FillConfig::FILL_RATE_MIN);
+        thresh = thresh.max(T::fill_rate_min());
         thresh = (thresh * 100.0).ceil() / 100.0;
         
         #[cfg(debug_assertions)]
@@ -44,10 +46,10 @@ impl RecFillModule {
 
     pub fn set_multi_fill(&self, mobile_output: &mut MobileOutput, thresh: f64) -> Result<()> {
         for rec_result in mobile_output.rec_results.iter_mut() {
-            if rec_result.rec_tpye != RecType::MultipleChoice {
+            if rec_result.rec_type != RecType::MultipleChoice {
                 continue;
             }
-            let fill_items = &mut rec_result.fill_items;
+            let fill_items = &mut rec_result.rec_options;
             for (index,fill_item) in fill_items.iter_mut().enumerate() {
                 if fill_item.fill_rate > thresh {
                     rec_result.rec_result[index] = true;
@@ -62,10 +64,10 @@ impl RecFillModule {
 
     pub fn set_default_fill(&self, mobile_output: &mut MobileOutput, thresh: f64) -> Result<()> {
         for rec_result in mobile_output.rec_results.iter_mut() {
-            if rec_result.rec_tpye != RecType::MultipleChoice && rec_result.rec_tpye != RecType::SingleChoice{
+            if rec_result.rec_type != RecType::MultipleChoice && rec_result.rec_type != RecType::SingleChoice{
                 continue;
             }
-            let fill_items = &mut rec_result.fill_items;
+            let fill_items = &mut rec_result.rec_options;
             for (index,fill_item) in fill_items.iter_mut().enumerate() {
                 if fill_item.fill_rate > thresh {
                     rec_result.rec_result[index] = true;
@@ -80,7 +82,7 @@ impl RecFillModule {
 
     pub fn set_single_fill(&self, mobile_output: &mut MobileOutput, thresh: f64) -> Result<()> {
         for rec_result in mobile_output.rec_results.iter_mut() {
-            if rec_result.rec_tpye != RecType::SingleChoice {
+            if rec_result.rec_type != RecType::SingleChoice {
                 continue;
             }
             
@@ -88,7 +90,7 @@ impl RecFillModule {
             let mut max_fill_rate = 0.0;
             let mut max_index = None;
             
-            for (index, fill_item) in rec_result.fill_items.iter().enumerate() {
+            for (index, fill_item) in rec_result.rec_options.iter().enumerate() {
                 if fill_item.fill_rate > max_fill_rate {
                     max_fill_rate = fill_item.fill_rate;
                     max_index = Some(index);
@@ -108,7 +110,10 @@ impl RecFillModule {
 
     pub fn calculate_all_fill_rate(&self, integral_image: &Mat, mobile_output: &mut MobileOutput) -> Result<()> {
         for rec_result in mobile_output.rec_results.iter_mut() {
-            let fill_items = &mut rec_result.fill_items;
+            if rec_result.rec_type != RecType::SingleChoice && rec_result.rec_type != RecType::MultipleChoice {
+                continue;
+            }
+            let fill_items = &mut rec_result.rec_options;
             for fill_item in fill_items.iter_mut() {
                 let fill_rate = calculate_fill_rate(integral_image, &mut fill_item.coordinate)?;
                 fill_item.fill_rate = fill_rate;
@@ -118,9 +123,12 @@ impl RecFillModule {
         Ok(())
     }
 
-    pub fn refine_all_fill_coordinate(&self, integral_image: &Mat, mobile_output: &mut MobileOutput) -> Result<()> {
+    pub fn refine_all_fill_coordinate<T: FillConfig>(&self, integral_image: &Mat, mobile_output: &mut MobileOutput) -> Result<()> {
         for rec_result in mobile_output.rec_results.iter_mut() {
-            let res = self.refine_items_fill_coordinate(integral_image, &mut rec_result.fill_items);
+            if rec_result.rec_type == RecType::Vx {
+                continue;
+            }
+            let res = self.refine_items_fill_coordinate::<T>(integral_image, &mut rec_result.rec_options);
             if res.is_err() {
                 continue;
             }
@@ -131,7 +139,7 @@ impl RecFillModule {
 
     /// 通过Otsu最大类间方差优化坐标位置
     /// 在以当前坐标为中心的4x4范围内(-2到2)寻找使所有选项填涂率方差最大的位置
-    fn refine_items_fill_coordinate(&self, integral_image: &Mat, fill_items: &mut Vec<FillItem>) -> Result<()> {
+    fn refine_items_fill_coordinate<T: FillConfig>(&self, integral_image: &Mat, fill_items: &mut Vec<RecOption>) -> Result<()> {
         if fill_items.is_empty() {
             return Ok(());
         }
@@ -140,8 +148,8 @@ impl RecFillModule {
         let mut best_coordinates: Vec<Coordinate> = Vec::new();
 
         // 在-2到2的范围内搜索最优坐标偏移
-        for dx in -FillConfig::REFINE_COOR_RANGE ..= FillConfig::REFINE_COOR_RANGE{
-            for dy in -FillConfig::REFINE_COOR_RANGE ..= FillConfig::REFINE_COOR_RANGE {
+        'outer: for dx in -T::refine_coor_range() ..= T::refine_coor_range() {
+            for dy in -T::refine_coor_range() ..= T::refine_coor_range(){
                 let mut fill_rates = Vec::new();
                 let mut temp_coordinates = Vec::new();
                 
@@ -158,6 +166,12 @@ impl RecFillModule {
                     let fill_rate_result = calculate_fill_rate(integral_image, &new_coordinate)?;
                     fill_rates.push(fill_rate_result);
                     temp_coordinates.push(new_coordinate);
+                }
+                // 如果所有fill_rate都大于0.8，结束搜索
+                if fill_rates.iter().all(|&rate| rate > 0.8) {
+                    best_coordinates = temp_coordinates;
+                    max_variance = f64::MAX;
+                    break 'outer;
                 }
                 
                 let (_, variance) = crate::myutils::math::otsu_threshold(&fill_rates);
@@ -215,20 +229,7 @@ pub fn calculate_fill_rate(integral_image: &Mat, coordinate: &Coordinate) -> Res
         anyhow::bail!("坐标超出积分图范围");
     }
     
-    let x1 = coordinate.x as i32; // 左上角x坐标
-    let y1 = coordinate.y as i32; // 左上角y坐标
-    let x2 = x1 + coordinate.w as i32; // 右下角x坐标
-    let y2 = y1 + coordinate.h as i32; // 右下角y坐标
-    
-    // 从积分图获取四个角的值
-    // 积分图通常是i32类型，需要解引用后再转换为f64进行计算
-    let a = *integral_image.at_2d::<i32>(y1, x1)? as f64; // 左上角上方
-    let b = *integral_image.at_2d::<i32>(y1, x2)? as f64;     // 右上角上方
-    let c = *integral_image.at_2d::<i32>(y2, x1)? as f64;     // 左下角左侧
-    let d = *integral_image.at_2d::<i32>(y2, x2)? as f64;         // 右下角
-    
-    // 使用积分图计算区域和
-    let sum = d - b - c + a;
+    let sum = sum_pixel(integral_image, coordinate)?;
     
     // 计算区域面积
     let area = coordinate.w as f64 * coordinate.h as f64;

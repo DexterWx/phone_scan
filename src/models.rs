@@ -63,6 +63,8 @@ pub enum RecType {
     SingleChoice = 1,
     /// 多选题
     MultipleChoice = 2,
+    // 划分题
+    Vx = 3
 }
 
 impl From<i32> for RecType {
@@ -70,6 +72,7 @@ impl From<i32> for RecType {
         match value {
             1 => RecType::SingleChoice,
             2 => RecType::MultipleChoice,
+            3 => RecType::Vx,
             _ => RecType::SingleChoice, // 默认值
         }
     }
@@ -180,15 +183,42 @@ impl AssistLocation {
 pub struct RecResult {
     /// 对应输入的sub_options，true表示选中，false表示未选中
     pub rec_result: Vec<bool>,
-    pub fill_items: Vec<FillItem>,
-    pub rec_tpye: RecType
+    pub rec_options: Vec<RecOption>,
+    pub rec_type: RecType
 }
 
 /// 填涂率结果
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FillItem {
+pub struct RecOption {
     pub fill_rate: f64,
     pub coordinate: Coordinate,
+    pub vx: bool,
+    pub topology: Option<TopologyFeatures>
+
+}
+
+/// 拓扑特征结构体
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TopologyFeatures {
+    pub branch_points: usize,    // 分支点数量（3+ 邻居）
+    pub end_points: usize,       // 端点数量（1 邻居）
+    pub isolated_points: usize,  // 孤立点（0 邻居）
+    pub total_pixels: usize,     // 总像素数
+    pub image_width: usize,      // 图片宽度
+    pub image_height: usize,     // 图片高度
+}
+
+impl TopologyFeatures {
+    pub fn default() -> TopologyFeatures {
+        TopologyFeatures {
+            branch_points: 0,
+            end_points: 0,
+            isolated_points: 0,
+            total_pixels: 0,
+            image_width: 0,
+            image_height: 0,
+        }
+    }
 }
 
 /// 输出数据结构
@@ -212,13 +242,15 @@ impl MobileOutput {
                 // 为每个rec_item创建对应的RecResult，初始化所有选项为false
                 RecResult {
                     rec_result: vec![false; rec_item.sub_options.len()],
-                    fill_items: rec_item.sub_options.iter().map(
-                        |coordinate| FillItem {
+                    rec_options: rec_item.sub_options.iter().map(
+                        |coordinate| RecOption {
                             fill_rate: 0.0,
                             coordinate: coordinate.clone(),
+                            vx: false,
+                            topology: None
                         }
                     ).collect(),
-                    rec_tpye: rec_item.rec_type
+                    rec_type: rec_item.rec_type
                 }
             })
             .collect();

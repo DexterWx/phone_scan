@@ -15,7 +15,7 @@ mod tests {
 
     #[test]
     fn test_demo() -> Result<()> {
-        let scan_id = "254818";
+        let scan_id = "13406";
         let scan_path = format!("dev/test_data/cards/{scan_id}/test.json");
         let img_path = format!("dev/test_data/cards/{scan_id}/test.jpg");
         let image = imread(&img_path, opencv::imgcodecs::IMREAD_COLOR)?;
@@ -32,7 +32,7 @@ mod tests {
 
     #[test]
     fn test_paper() -> Result<()> {
-        let scan_id = "13498";
+        let scan_id = "13516";
         let scan_path = format!("dev/test_data/cards/{scan_id}/test.json");
         let img_path = format!("dev/test_data/cards/{scan_id}/test.jpg");
         let image = imread(&img_path, opencv::imgcodecs::IMREAD_COLOR)?;
@@ -60,6 +60,31 @@ pub mod build {
         let mark_str = c_to_string(mark_ptr);
 
         let engine = RecEngine::new_single(&mark_str);
+        
+        let mut res = InitInfo {
+            code: 0,
+            message: "初始化成功".to_string(),
+        };
+        
+        if engine.is_err() {
+            res.code = 1;
+            res.message = engine.err().unwrap().to_string();
+            return CString::new(to_json(&res).unwrap()).unwrap().into_raw()
+        }
+
+        // 初始化引擎
+        unsafe {
+            ENGINE = Some(engine.unwrap());
+        }
+
+        return CString::new(to_json(&res).unwrap()).unwrap().into_raw()
+    }
+
+    #[no_mangle]
+    pub extern "C" fn initialize_paper(mark_ptr: *const c_char) -> *mut c_char{
+        let mark_str = c_to_string(mark_ptr);
+
+        let engine = RecEngine::new_paper(&mark_str);
         
         let mut res = InitInfo {
             code: 0,
@@ -111,6 +136,47 @@ pub mod build {
                 return CString::new(to_json(&failed_output).unwrap()).unwrap().into_raw();
             }
             return CString::new(to_json(&success_output.unwrap()).unwrap()).unwrap().into_raw();
+        }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn inference_paper(data_ptr: *const u8, data_len: usize) -> *mut c_char {
+        let mut failed_output = MobileOutput {
+            code: 1,
+            message: "failed".to_string(),
+            page_number: 0,
+            rec_results: vec![],
+        };
+
+        unsafe {
+            if ENGINE.is_none() {
+                failed_output.message = "请先初始化引擎".to_string();
+                return CString::new(to_json(&failed_output).unwrap()).unwrap().into_raw();
+            }
+        }
+
+        let image = c_to_mat(data_ptr, data_len);
+        if image.is_err() {
+            failed_output.message = image.err().unwrap().to_string();
+            return CString::new(to_json(&failed_output).unwrap()).unwrap().into_raw();
+        }
+
+        unsafe {
+            let engine = ENGINE.as_ref().unwrap();
+            let success_output = engine.inference_paper(&image.unwrap());
+            if success_output.is_err() {
+                failed_output.message = success_output.err().unwrap().to_string();
+                return CString::new(to_json(&failed_output).unwrap()).unwrap().into_raw();
+            }
+            return CString::new(to_json(&success_output.unwrap()).unwrap()).unwrap().into_raw();
+        }
+    }
+
+    /// 销毁引擎，释放资源
+    #[no_mangle]
+    pub extern "C" fn destroy_engine() {
+        unsafe {
+            ENGINE = None; // 将引擎设置为None，触发Drop释放资源
         }
     }
 

@@ -1,13 +1,14 @@
-use anyhow::{Context, Ok, Result, bail};
+use anyhow::{Context, Ok, Result};
 use opencv::core::Mat;
-use opencv::imgcodecs;
-use crate::config::{AssistLocationPageConfig, AssistLocationSingleConfig, ImageProcessingConfig};
-use crate::models::{Coordinate, MarkPaper, MarkSingle, MobileOutput};
+use crate::config::{AssistLocationSingleConfig, FillPageConfig, FillSingleConfig, ImageProcessingConfig};
+use crate::models::{MarkPaper, MarkSingle, MobileOutput};
 use crate::myutils::image::{get_perspective_transform_matrix_with_boundary, get_perspective_transform_matrix_with_assists, pers_trans_image, process_image};
 use crate::myutils::myjson::from_json;
 use crate::recognize::fill::RecFillModule;
 use crate::recognize::location::LocationModule;
 use crate::recognize::assist_location::AssistLocationModule;
+use crate::recognize::page_number::PageNumberModule;
+use crate::recognize::vx::RecVxModule;
 
 /// 识别引擎
 pub struct RecEngine {
@@ -17,6 +18,10 @@ pub struct RecEngine {
     rec_fill_module: RecFillModule,
     /// 辅助定位模块
     assist_location_module: AssistLocationModule,
+    /// 划分识别模块
+    rec_vx_module: RecVxModule,
+    /// 页码识别模块
+    page_number_module: PageNumberModule,
     /// 初始化mark信息
     mark_single: Option<MarkSingle>,
     mark_paper: Option<MarkPaper>
@@ -28,6 +33,8 @@ impl RecEngine {
             location_module: LocationModule::new(),
             assist_location_module: AssistLocationModule::new(),
             rec_fill_module: RecFillModule::new(),
+            rec_vx_module: RecVxModule::new(),
+            page_number_module: PageNumberModule::new(),
             mark_single: Some(from_json(mobile_input)?),
             mark_paper: None
         })
@@ -38,6 +45,8 @@ impl RecEngine {
             location_module: LocationModule::new(),
             assist_location_module: AssistLocationModule::new(),
             rec_fill_module: RecFillModule::new(),
+            rec_vx_module: RecVxModule::new(),
+            page_number_module: PageNumberModule::new(),
             mark_paper: Some(from_json(mobile_input)?),
             mark_single: None
         })
@@ -74,7 +83,7 @@ impl RecEngine {
         )?;
 
         // 9. 填涂识别
-        self.rec_fill_module.infer(&baizheng, &mut mobile_output)?;
+        self.rec_fill_module.infer::<FillSingleConfig>(&baizheng, &mut mobile_output)?;
 
         // 渲染
         #[cfg(debug_assertions)]
@@ -145,32 +154,34 @@ impl RecEngine {
             &processed_image, &pers_trans_matrix, tg_boundary.x+tg_boundary.w, tg_boundary.y+tg_boundary.h
         )?;
 
-        let params = opencv::core::Vector::<i32>::new();
-        let rgb_path = format!("dev/test_data/debug/{}.jpg", "baizheng_rgb");
-        opencv::imgcodecs::imwrite(&rgb_path, &baizheng.rgb, &params)
-            .context("保存调试图片失败")?;
+        let page_index = self.page_number_module.infer(&baizheng, &mark.page_number)?;
+        let page_mark = mark.pages.get(page_index-1)
+            .context("未找到对应的页码信息")?;
 
         // 5. 找到辅助定位点
-        let assist_location = self.assist_location_module.infer_paper(&baizheng, &mark.pages[0].assist_location)?;
-        println!("assist_location: {:?}", assist_location);
-        // // 6. 获取变换矩阵
-        // let pers_trans_matrix = get_perspective_transform_matrix_with_assists(&assist_location, &mark.pages[0].assist_location)?;
+        let assist_location = self.assist_location_module.infer_paper(&baizheng, &page_mark.assist_location)?;
         
-        // // 7. 第二次变换
-        // let baizheng = pers_trans_image(
-        //     &baizheng, &pers_trans_matrix, mark.boundary.x+mark.boundary.w, mark.boundary.y+mark.boundary.h
-        // )?;
+        // 6. 获取变换矩阵
+        let pers_trans_matrix = get_perspective_transform_matrix_with_assists(&assist_location, &page_mark.assist_location)?;
+        
+        // 7. 第二次变换
+        let baizheng = pers_trans_image(
+            &baizheng, &pers_trans_matrix, mark.boundary.x+mark.boundary.w, mark.boundary.y+mark.boundary.h
+        )?;
 
         // 8. 初始化输出
-        let mut mobile_output = MobileOutput::new(&mark.pages[0].rec_items);
+        let mut mobile_output = MobileOutput::new(&page_mark.rec_items);
         
-        // // 9. 填涂识别
-        // self.rec_fill_module.infer(&baizheng, &mut mobile_output)?;
+        // 9. 填涂识别
+        self.rec_fill_module.infer::<FillPageConfig>(&baizheng, &mut mobile_output)?;
 
+        // 10. vx识别
+        self.rec_vx_module.infer(&baizheng, &mut mobile_output)?;
+        
 
         // 渲染
         #[cfg(debug_assertions)] {
-            use opencv::{core::{AlgorithmHint, Vector}, imgcodecs::imwrite, imgproc};
+            use opencv::{core::Vector, imgcodecs::imwrite};
             use crate::myutils::rendering::{render_output, render_quad, Colors, RenderMode};
 
             let mut render_image = processed_image.rgb.clone();
@@ -186,12 +197,12 @@ impl RecEngine {
             imwrite(&rgb_path, &baizheng.rgb, &params)
                 .context("保存调试图片失败")?;
 
-            // let mut render_out = baizheng.rgb.clone();
-            // let _ = render_output(&mut render_out, &mobile_output, &mark.pages[0].assist_location,Some(RenderMode::Hollow), Some(Colors::orange()), Some(2), Some(2.0));
+            let mut render_out = baizheng.rgb.clone();
+            let _ = render_output(&mut render_out, &mobile_output, &mark.pages[0].assist_location,Some(RenderMode::Hollow), Some(Colors::orange()), Some(2), Some(1.0));
 
-            // let render_out_path = format!("dev/test_data/debug/{}.jpg", "render_out");
-            // imwrite(&render_out_path, &render_out, &params)
-            //     .context("保存调试图片失败")?;
+            let render_out_path = format!("dev/test_data/debug/{}.jpg", "render_out");
+            imwrite(&render_out_path, &render_out, &params)
+                .context("保存调试图片失败")?;
         }
         
         

@@ -4,15 +4,13 @@ use crate::models::Coordinate;
 use crate::models::AssistLocation;
 use crate::models::ProcessedImage;
 use crate::myutils::image::merge_coordinates;
-use crate::config::AssistLocationSingleConfig;
-use crate::recognize::location;
 use anyhow::Ok;
 use anyhow::Result;
 use opencv::core::Mat;
 use opencv::core::MatTraitConst;
 use opencv::{
     core::{Rect, Vector},
-    imgproc::{contour_area, find_contours, bounding_rect, RETR_EXTERNAL, CHAIN_APPROX_SIMPLE},
+    imgproc::{find_contours, bounding_rect, RETR_EXTERNAL, CHAIN_APPROX_SIMPLE},
 };
 
 pub struct AssistLocationModule;
@@ -26,12 +24,15 @@ impl AssistLocationModule {
         &self, processed_image: &ProcessedImage,
         assist_location: &AssistLocation
     ) -> Result<AssistLocation> {
-        let left_area = merge_coordinates(&assist_location.left, T::assist_area_extend_size());
-        let right_area = merge_coordinates(&assist_location.right, T::assist_area_extend_size());
+        let left_area = merge_coordinates(&assist_location.left, T::assist_area_extend_size_w(), T::assist_area_extend_size_h());
+        let right_area = merge_coordinates(&assist_location.right, T::assist_area_extend_size_w(), T::assist_area_extend_size_h());
         let left_src_assist = Self::find_assist_location::<T>(&processed_image.closed, &left_area)?;
         let right_src_assist = Self::find_assist_location::<T>(&processed_image.closed, &right_area)?;
-        println!("找到辅助定位点，左侧{:?}，右侧{:?}", left_src_assist, right_src_assist);
 
+        // let mut rgb = processed_image.rgb.clone();
+        // render_coordinates(&mut rgb, &left_src_assist, Some(crate::myutils::rendering::RenderMode::Hollow), None, None);
+        // render_coordinates(&mut rgb, &right_src_assist, Some(crate::myutils::rendering::RenderMode::Hollow), None, None);
+        // opencv::imgcodecs::imwrite("dev/test_data/debug/assist_location_found.jpg", &rgb, &Vector::<i32>::new()).unwrap();
         if left_src_assist.len() != right_src_assist.len() {
             anyhow::bail!("辅助定位点数量不匹配，左侧找到{}个，右侧找到{}个", left_src_assist.len(), right_src_assist.len());
         }
@@ -113,7 +114,9 @@ impl AssistLocationModule {
                     h: bounding_rect.height-2,
                 }
             )?;
-            if fill_rate < T::assist_point_min_fill_ratio() {continue;}
+            if fill_rate < T::assist_point_min_fill_ratio() {
+                continue;
+            }
             assist_points.push(Coordinate {
                 x: bounding_rect.x + coordinate.x,
                 y: bounding_rect.y + coordinate.y,
