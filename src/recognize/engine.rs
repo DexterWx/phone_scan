@@ -171,6 +171,7 @@ impl RecEngine {
 
         // 8. 初始化输出
         let mut mobile_output = MobileOutput::new(&page_mark.rec_items);
+        mobile_output.page_number = page_index-1;
         
         // 9. 填涂识别
         self.rec_fill_module.infer::<FillPageConfig>(&baizheng, &mut mobile_output)?;

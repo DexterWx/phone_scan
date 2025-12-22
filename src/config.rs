@@ -70,7 +70,7 @@ impl AssistLocationConfig for AssistLocationPageConfig {
     fn assist_point_max_size() -> i32 { 20 }
     fn assist_point_min_area() -> f64 { 150.0 }
     fn assist_point_max_area() -> f64 { 310.0 }
-    fn assist_point_min_fill_ratio() -> f64 { 0.9 }
+    fn assist_point_min_fill_ratio() -> f64 { 0.88 }
     fn assist_point_whdiff_max() -> i32 { 4 }
 }
 

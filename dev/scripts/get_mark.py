@@ -246,7 +246,6 @@ if __name__ == "__main__":
     data = MarkDataProcessor.fetch_mark_data(mark_url)
     
     mark = MarkDataProcessor.parse_mark_data(data) if not is_paper else MarkDataProcessor.parse_paper_data(data)
-    
     # 保存JSON数据
     FileManager.save_json(mark, output_dir)
     

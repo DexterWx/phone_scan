@@ -16,7 +16,14 @@
 /**
  * 统一输入图像的宽度
  */
-#define ImageProcessingConfig_TARGET_WIDTH 2400
+#define ImageProcessingConfig_TARGET_WIDTH_A4 2400
+
+#define ImageProcessingConfig_TARGET_WIDTH_A3 4000
+
+/**
+ * 目标图片缩放比例
+ */
+#define ImageProcessingConfig_PAPER_SCAN_TARGET_SCALE 2.0
 
 /**
  * 自适应阈值的块大小
@@ -48,30 +55,25 @@
  */
 #define ImageProcessingConfig_MARGIN_PENALTY 50.0
 
-#define AssistLocationConfig_ASSIST_AREA_EXTEND_SIZE 6
+#define CommonConfig_PAGE_NUMBER_FILL_RATE 0.6
 
 /**
- * 辅助定位点的标准大小
+ * 页码点位置扩展大小
  */
-#define AssistLocationConfig_ASSIST_POINT_MIN_SIZE 4
-
-#define AssistLocationConfig_ASSIST_POINT_MAX_SIZE 9
-
-#define AssistLocationConfig_ASSIST_POINT_MIN_AREA 20.0
-
-#define AssistLocationConfig_ASSIST_POINT_MAX_AREA 70.0
-
-#define AssistLocationConfig_ASSIST_POINT_MIN_FILL_RATIO 0.9
-
-#define AssistLocationConfig_ASSIST_POINT_WHDIFF_MAX 2
-
-#define FillConfig_FILL_RATE_MIN 0.45
-
-#define FillConfig_REFINE_COOR_RANGE 2
+#define CommonConfig_PAGE_NUMBER_EXTEND_SIZE 20
 
 char *initialize(const char *mark_ptr);
 
+char *initialize_paper(const char *mark_ptr);
+
 char *inference(const uint8_t *data_ptr, uintptr_t data_len);
+
+char *inference_paper(const uint8_t *data_ptr, uintptr_t data_len);
+
+/**
+ * 销毁引擎，释放资源
+ */
+void destroy_engine(void);
 
 /**
  * 释放C字符串内存

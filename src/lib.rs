@@ -15,7 +15,7 @@ mod tests {
 
     #[test]
     fn test_demo() -> Result<()> {
-        let scan_id = "13406";
+        let scan_id = "257121";
         let scan_path = format!("dev/test_data/cards/{scan_id}/test.json");
         let img_path = format!("dev/test_data/cards/{scan_id}/test.jpg");
         let image = imread(&img_path, opencv::imgcodecs::IMREAD_COLOR)?;
@@ -32,7 +32,7 @@ mod tests {
 
     #[test]
     fn test_paper() -> Result<()> {
-        let scan_id = "13516";
+        let scan_id = "13515";
         let scan_path = format!("dev/test_data/cards/{scan_id}/test.json");
         let img_path = format!("dev/test_data/cards/{scan_id}/test.jpg");
         let image = imread(&img_path, opencv::imgcodecs::IMREAD_COLOR)?;

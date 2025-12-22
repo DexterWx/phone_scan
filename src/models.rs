@@ -227,7 +227,7 @@ pub struct MobileOutput {
     /// 识别状态：0-成功，1-失败
     pub code: i32,
     pub message: String,
-    pub page_number: u8,
+    pub page_number: usize,
     /// 对应输入的rec_items的识别结果
     pub rec_results: Vec<RecResult>
 }
