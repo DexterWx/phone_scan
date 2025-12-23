@@ -41,13 +41,15 @@ impl RecEngine {
     }
 
     pub fn new_paper(mobile_input: &String) -> Result<Self> {
+        let mut mark_paper: MarkPaper = from_json(mobile_input)?;
+        mark_paper.init_sort();
         Ok(Self {
             location_module: LocationModule::new(),
             assist_location_module: AssistLocationModule::new(),
             rec_fill_module: RecFillModule::new(),
             rec_vx_module: RecVxModule::new(),
             page_number_module: PageNumberModule::new(),
-            mark_paper: Some(from_json(mobile_input)?),
+            mark_paper: Some(mark_paper),
             mark_single: None
         })
     }
@@ -199,7 +201,7 @@ impl RecEngine {
                 .context("保存调试图片失败")?;
 
             let mut render_out = baizheng.rgb.clone();
-            let _ = render_output(&mut render_out, &mobile_output, &mark.pages[0].assist_location,Some(RenderMode::Hollow), Some(Colors::orange()), Some(2), Some(1.0));
+            let _ = render_output(&mut render_out, &mobile_output, &mark.pages[page_index-1].assist_location,Some(RenderMode::Hollow), Some(Colors::orange()), Some(2), Some(1.0));
 
             let render_out_path = format!("dev/test_data/debug/{}.jpg", "render_out");
             imwrite(&render_out_path, &render_out, &params)

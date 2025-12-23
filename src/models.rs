@@ -175,6 +175,21 @@ impl AssistLocation {
         // 只返回坐标列表部分
         result.into_iter().map(|(_, coords)| coords).collect()
     }
+    // 先x后y排序
+    fn init_sort(&mut self) {
+        self.left.sort_by(|a, b| {                                                                                   
+            match a.x.cmp(&b.x) {                                                                                    
+                std::cmp::Ordering::Equal => a.y.cmp(&b.y),                                                          
+                other => other,                                                                                      
+            }                                                                                                        
+        });
+        self.right.sort_by(|a, b| {                                                                                   
+            match a.x.cmp(&b.x) {                                                                                    
+                std::cmp::Ordering::Equal => a.y.cmp(&b.y),                                                          
+                other => other,                                                                                      
+            }                                                                                                        
+        });
+    }
     
 }
 
@@ -294,6 +309,11 @@ impl MarkPaper {
             pages: self.pages.iter().map(|page| page.resize(scale)).collect(),
         }
     }
+    pub fn init_sort(&mut self) {
+        for page in &mut self.pages {
+            page.init_sort();
+        }
+    }
 }
 
 /// 单页标注信息
@@ -311,6 +331,10 @@ impl MarkPage {
             rec_items: self.rec_items.iter().map(|item| item.resize(scale)).collect(),
             assist_location: self.assist_location.resize(scale),
         }
+    }
+
+    fn init_sort(&mut self) {
+        self.assist_location.init_sort();
     }
 }
 
