@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
-use opencv::core::Point2i as CvPoint2i;
+use opencv::core::{Point2f, Point2i as CvPoint2i, Vector};
 use std::collections::HashMap;
+
+use crate::myutils::image::get_points_from_coordinates;
 
 /// 坐标信息
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -25,6 +27,15 @@ impl Coordinate {
             h: (self.h as f64 * scale) as i32,
         }
     }
+
+    pub fn to_points(&self) -> Vector<Point2f> {
+        let mut points = Vector::new();
+        points.push(Point2f::new(self.x as f32, self.y as f32));
+        points.push(Point2f::new((self.x + self.w) as f32, self.y as f32));
+        points.push(Point2f::new((self.x + self.w) as f32, (self.y + self.h) as f32));
+        points.push(Point2f::new(self.x as f32, (self.y + self.h) as f32));
+        points
+    }
 }
 
 /// 非矩形四边形
@@ -32,6 +43,16 @@ impl Coordinate {
 pub struct Quad {
     /// 四个顶点坐标
     pub points: [CvPoint2i; 4],
+}
+
+impl Quad {
+    pub fn to_points(&self) -> Vector<Point2f> {
+        let mut points = Vector::new();
+        for point in &self.points {
+            points.push(Point2f::new(point.x as f32, point.y as f32));
+        }
+        points
+    }
 }
 
 /// 轮廓信息，包含额外的检测数据
@@ -189,6 +210,12 @@ impl AssistLocation {
                 other => other,                                                                                      
             }                                                                                                        
         });
+    }
+
+    pub fn to_points(&self) -> Vector<Point2f> {
+        let coors = vec![self.left.clone(), self.right.clone()].concat();
+        let points = get_points_from_coordinates(&coors);
+        points
     }
     
 }

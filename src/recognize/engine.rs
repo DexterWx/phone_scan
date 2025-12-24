@@ -2,7 +2,7 @@ use anyhow::{Context, Ok, Result};
 use opencv::core::Mat;
 use crate::config::{AssistLocationSingleConfig, FillPageConfig, FillSingleConfig, ImageProcessingConfig};
 use crate::models::{MarkPaper, MarkSingle, MobileOutput};
-use crate::myutils::image::{get_perspective_transform_matrix_with_boundary, get_perspective_transform_matrix_with_assists, pers_trans_image, process_image};
+use crate::myutils::image::{get_perspective_transform_matrix_with_boundary, get_perspective_transform_matrix_with_points, pers_trans_image, process_image};
 use crate::myutils::myjson::from_json;
 use crate::recognize::fill::RecFillModule;
 use crate::recognize::location::LocationModule;
@@ -66,7 +66,7 @@ impl RecEngine {
         let location = self.location_module.infer(&processed_image)?;
 
         // 4. 获取变换矩阵
-        let pers_trans_matrix = get_perspective_transform_matrix_with_boundary(&location, &mark.boundary)?;
+        let pers_trans_matrix = get_perspective_transform_matrix_with_boundary(&location.to_points(), &mark.boundary.to_points())?;
 
         // 5. 第一次变换
         let baizheng = pers_trans_image(
@@ -77,7 +77,13 @@ impl RecEngine {
         let assist_location = self.assist_location_module.infer_single::<AssistLocationSingleConfig>(&baizheng, &mark.assist_location)?;
         
         // 7. 获取变换矩阵
-        let pers_trans_matrix = get_perspective_transform_matrix_with_assists(&assist_location, &mark.assist_location)?;
+        let mut src = assist_location.to_points();
+        let mut target = mark.assist_location.to_points();
+        if src.len() < 4 || target.len() < 4 {
+            src.extend(mark.boundary.to_points());
+            target.extend(mark.boundary.to_points());
+        }
+        let pers_trans_matrix = get_perspective_transform_matrix_with_points(&src, &target)?;
         
         // 8. 第二次变换
         let baizheng = pers_trans_image(
@@ -149,7 +155,7 @@ impl RecEngine {
 
         // 3. 获取变换矩阵
         let tg_boundary = &mark.boundary;
-        let pers_trans_matrix = get_perspective_transform_matrix_with_boundary(&location, tg_boundary)?;
+        let pers_trans_matrix = get_perspective_transform_matrix_with_boundary(&location.to_points(), &tg_boundary.to_points())?;
         
         // 4. 第一次变换
         let baizheng = pers_trans_image(
@@ -164,7 +170,13 @@ impl RecEngine {
         let assist_location = self.assist_location_module.infer_paper(&baizheng, &page_mark.assist_location)?;
         
         // 6. 获取变换矩阵
-        let pers_trans_matrix = get_perspective_transform_matrix_with_assists(&assist_location, &page_mark.assist_location)?;
+        let mut src = assist_location.to_points();
+        let mut target = page_mark.assist_location.to_points();
+        if src.len() < 4 || target.len() < 4 {
+            src.extend(mark.boundary.to_points());
+            target.extend(mark.boundary.to_points());
+        }
+        let pers_trans_matrix = get_perspective_transform_matrix_with_points(&src, &target)?;
         
         // 7. 第二次变换
         let baizheng = pers_trans_image(

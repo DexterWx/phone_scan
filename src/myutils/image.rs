@@ -105,12 +105,9 @@ pub fn process_image(image: &Mat, target_width: i32) -> Result<ProcessedImage> {
 /// detected_quad: 检测到的四边形（实际图片中的四边形）
 /// target_rect: 目标矩形区域（xywh格式）
 pub fn get_perspective_transform_matrix_with_boundary(
-    detected_quad: &Quad,
-    target_rect: &Coordinate,
+    src_points: &Vector<Point2f>,
+    target_points: &Vector<Point2f>,
 ) -> Result<Mat> {
-    // 将检测到的点转换为OpenCV格式
-    let src_points = get_points_from_quad(detected_quad);
-    let target_points = get_points_from_coordinate(target_rect);
 
     // 计算透视变换矩阵
     let transform_matrix = imgproc::get_perspective_transform(&src_points, &target_points, 0)
@@ -119,23 +116,18 @@ pub fn get_perspective_transform_matrix_with_boundary(
     Ok(transform_matrix)
 }
 
-pub fn get_perspective_transform_matrix_with_assists(
-    src_assists: &AssistLocation,
-    target_assists: &AssistLocation,
+pub fn get_perspective_transform_matrix_with_points(
+    src_points: &Vector<Point2f>,
+    target_points: &Vector<Point2f>,
 ) -> Result<Mat> {
-    let src_coors = vec![src_assists.left.clone(), src_assists.right.clone()].concat();
-    let target_coors = vec![target_assists.left.clone(), target_assists.right.clone()].concat();
-    // 将检测到的点转换为 OpenCV Mat（CV_32FC2）
-    let src_points = get_points_from_coordinates(&src_coors);
-    let target_points = get_points_from_coordinates(&target_coors);
 
     // 输出 mask，用于查看哪些点是 inlier
     let mut mask = Mat::default();
 
     // 计算透视矩阵
     let transform_matrix = calib3d::find_homography(
-        &src_points,
-        &target_points,
+        src_points,
+        target_points,
         &mut mask,
         0,  // 也可用 calib3d::LMEDS 或 RANSAC
         3.0,               // ransac_reproj_threshold (像素)
@@ -143,18 +135,6 @@ pub fn get_perspective_transform_matrix_with_assists(
     .context("使用 RANSAC 计算透视变换矩阵失败")?;
 
     Ok(transform_matrix)
-}
-
-/// 将四边形转换为OpenCV格式
-pub fn get_points_from_quad(quad: &Quad) -> Vector<Point2f> {
-    // 将检测到的点转换为OpenCV格式
-    let points = Vector::<Point2f>::from_slice(&[
-        Point2f::new(quad.points[0].x as f32, quad.points[0].y as f32),
-        Point2f::new(quad.points[1].x as f32, quad.points[1].y as f32),
-        Point2f::new(quad.points[2].x as f32, quad.points[2].y as f32),
-        Point2f::new(quad.points[3].x as f32, quad.points[3].y as f32),
-    ]);
-    points
 }
 
 pub fn get_points_from_coordinate(coordinate: &Coordinate) -> Vector<Point2f> {

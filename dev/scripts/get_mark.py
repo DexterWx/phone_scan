@@ -132,6 +132,8 @@ class MarkDataProcessor:
             boundary = data["body"]['scanJson']['pages'][0]['objective_scan_area']
             pages = []
             for index,page in enumerate(data["body"]['scanJson']['pages']):
+                if index==2:
+                    break
                 rec_items = []
                 assist_location = {
                     "left": [],
