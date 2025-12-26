@@ -28,7 +28,7 @@ impl AssistLocationModule {
         let right_area = merge_coordinates(&assist_location.right, T::assist_area_extend_size_w(), T::assist_area_extend_size_h());
         let left_src_assist = Self::find_assist_location::<T>(&processed_image.closed, &left_area)?;
         let right_src_assist = Self::find_assist_location::<T>(&processed_image.closed, &right_area)?;
-
+        // println!("辅助定位点寻找结果，左侧找到{}个，右侧找到{}个", left_src_assist.len(), right_src_assist.len());
         // let mut rgb = processed_image.rgb.clone();
         // render_coordinates(&mut rgb, &left_src_assist, Some(crate::myutils::rendering::RenderMode::Hollow), None, None);
         // render_coordinates(&mut rgb, &right_src_assist, Some(crate::myutils::rendering::RenderMode::Hollow), None, None);

@@ -38,4 +38,4 @@ def extract_red_via_lab(image_path, output_path):
     print("同时也生成了 'only_a_channel.jpg'，亮度越高的地方代表红色特征越明显。")
 
 # 使用方法
-extract_red_via_lab('/Users/xu.wang/Desktop/20251223_194600_176.jpg', '/Users/xu.wang/Desktop/red.jpg')
+extract_red_via_lab('/Users/xu.wang/Desktop/截屏2025-12-25 14.34.49.png', '/Users/xu.wang/Desktop/red.jpg')

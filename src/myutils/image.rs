@@ -1,9 +1,9 @@
 use opencv::{
-    calib3d, core::{AlgorithmHint, BORDER_CONSTANT, Mat, Point2f, Point2i, Size, Vector, Scalar,bitwise_or, in_range, no_array}, imgcodecs::{IMREAD_COLOR, imdecode, imread}, imgproc, prelude::*
+    calib3d, core::{AlgorithmHint, BORDER_CONSTANT, CV_32S, Mat, Point2f, Point2i, Scalar, Size, Vector, bitwise_or, in_range, no_array}, imgcodecs::{IMREAD_COLOR, imdecode, imread}, imgproc, prelude::*
 };
 use base64::{Engine as _, engine::general_purpose};
 use anyhow::{Result, Context};
-use crate::{config::{VxConfig, VxPageConfig}, models::{AssistLocation, Coordinate, ProcessedImage, Quad, TopologyFeatures}};
+use crate::{config::{VxConfig, VxPageConfig}, models::{ConnectFeatures, Coordinate, ProcessedImage, TopologyFeatures}};
 use crate::config::ImageProcessingConfig;
 
 pub fn read_image(input: &String) -> Result<Mat> {
@@ -269,7 +269,7 @@ pub fn crop_image(image: &Mat, coordinate: &Coordinate) -> Result<Mat> {
 }
 
 // 输出二值图
-pub fn det_red(image: &Mat) -> Result<Mat> {
+pub fn det_red_hsv(image: &Mat) -> Result<Mat> {
     // 1. BGR -> HSV
     let mut hsv = Mat::default();
     imgproc::cvt_color(image, &mut hsv, imgproc::COLOR_BGR2HSV, 0, AlgorithmHint::ALGO_HINT_DEFAULT)?;
@@ -293,6 +293,42 @@ pub fn det_red(image: &Mat) -> Result<Mat> {
     bitwise_or(&mask1, &mask2, &mut red_mask, &no_array())?;
 
     Ok(red_mask)
+}
+
+pub fn det_red_lab(image: &Mat) -> Result<Mat> {
+    // 1. BGR -> Lab
+    let mut lab = Mat::default();
+    imgproc::cvt_color(
+        image,
+        &mut lab,
+        imgproc::COLOR_BGR2Lab,
+        0,
+        AlgorithmHint::ALGO_HINT_DEFAULT,
+    )?;
+
+    // 2. split Lab channels
+    let mut channels = Vector::<Mat>::new();
+    opencv::core::split(&lab, &mut channels)?;
+
+    // a 通道
+    let a_channel = channels.get(1)?;
+
+    // 3. CLAHE
+    let mut enhanced_a = Mat::default();
+    let mut clahe = imgproc::create_clahe(3.0, Size::new(8, 8))?;
+    clahe.apply(&a_channel, &mut enhanced_a)?;
+
+    // 4. Threshold -> binary mask
+    let mut mask = Mat::default();
+    imgproc::threshold(
+        &enhanced_a,
+        &mut mask,
+        VxPageConfig::lab_a_threshold(),
+        255.0,
+        imgproc::THRESH_BINARY,
+    )?;
+
+    Ok(mask)
 }
 
 pub fn sum_pixel(integral_image: &Mat, coordinate: &Coordinate) -> Result<f64> {
@@ -504,54 +540,297 @@ pub fn preprocess_vx_line<T: VxConfig>(image: &Mat) -> Result<Mat> {
     Ok(opened)
 }
 
-/// 提取拓扑特征
-pub fn extract_topology_features(skeleton: &Mat) -> Result<TopologyFeatures> {
-    let rows = skeleton.rows();
-    let cols = skeleton.cols();
 
-    let mut branch_points = 0;
-    let mut end_points = 0;
-    let mut isolated_points = 0;
-    let mut total_pixels = 0;
+/// 从骨架图中提取拓扑特征：
+/// - 每个连通域单独分析
+/// - 统计点数、端点数
+/// - 判断是否存在“真实分支”
+pub fn extract_topology_features(skeleton: &Mat) -> opencv::Result<TopologyFeatures> {
+    let mut labels = Mat::default();
+    let mut stats = Mat::default();
+    let mut centroids = Mat::default();
 
-    for i in 1..(rows - 1) {
-        for j in 1..(cols - 1) {
-            let center = *skeleton.at_2d::<u8>(i, j)?;
-            if center == 0 {
-                continue;
-            }
+    // 8 邻域连通域标记
+    let num = imgproc::connected_components_with_stats(
+        skeleton,
+        &mut labels,
+        &mut stats,
+        &mut centroids,
+        8,
+        CV_32S,
+    )?;
 
-            total_pixels += 1;
+    let mut features = TopologyFeatures::default();
 
-            // 统计 8 邻域非零像素数量
-            let mut neighbor_count = 0;
-            for di in -1..=1 {
-                for dj in -1..=1 {
-                    if di == 0 && dj == 0 {
-                        continue;
-                    }
-                    let neighbor = *skeleton.at_2d::<u8>(i + di, j + dj)?;
-                    if neighbor != 0 {
-                        neighbor_count += 1;
-                    }
+    for label in 1..num {
+        let points_count =
+            *stats.at_2d::<i32>(label, imgproc::CC_STAT_AREA)? as usize;
+
+        if points_count < VxPageConfig::component_min_points() {
+            continue;
+        }
+        // 直接从 stats 里拿 bounding box
+        let mut x = *stats.at_2d::<i32>(label, imgproc::CC_STAT_LEFT)?;
+        let mut y = *stats.at_2d::<i32>(label, imgproc::CC_STAT_TOP)?;
+        let mut w = *stats.at_2d::<i32>(label, imgproc::CC_STAT_WIDTH)?;
+        let mut h = *stats.at_2d::<i32>(label, imgproc::CC_STAT_HEIGHT)?;
+
+        if w <= 0 || h <= 0 {
+            continue;
+        }
+
+        // 向外扩 1 像素（注意边界）
+        let expand = 2;
+
+        let x0 = (x - expand).max(0);
+        let y0 = (y - expand).max(0);
+
+        let x1 = (x + w + expand).min(skeleton.cols());
+        let y1 = (y + h + expand).min(skeleton.rows());
+
+        x = x0;
+        y = y0;
+        w = x1 - x0;
+        h = y1 - y0;
+
+        // 在 bbox 内构建 component（而不是整张图）
+        let mut component = Mat::zeros(h, w, skeleton.typ())?.to_mat()?;
+
+        for yy in 0..h {
+            for xx in 0..w {
+                let ly = y + yy;
+                let lx = x + xx;
+                if *labels.at_2d::<i32>(ly, lx)? == label {
+                    *component.at_2d_mut::<u8>(yy, xx)? = 255;
                 }
             }
+        }
+        
+        let end_points = count_endpoints(&component)?;
+        let has_branch = has_true_branch(&component, 3)?;
+        let curvature_score = pca_line_error(&component)?;
 
-            match neighbor_count {
-                0 => isolated_points += 1,
-                1 => end_points += 1,
-                n if n >= 3 => branch_points += 1,
-                _ => {} // 2 个邻居：普通骨架点
+        features.connects.push(ConnectFeatures {
+            points_count,
+            has_branch,
+            end_points,
+            curvature_score,
+        });
+    }
+
+    Ok(features)
+}
+
+/// 基于 PCA 的直线拟合误差
+/// 返回：平均点到主轴的垂直距离
+fn pca_line_error(component: &Mat) -> opencv::Result<f64> {
+    let rows = component.rows();
+    let cols = component.cols();
+
+    let mut points: Vec<(f64, f64)> = Vec::new();
+
+    // 收集前景点
+    for y in 0..rows {
+        for x in 0..cols {
+            if *component.at_2d::<u8>(y, x)? > 0 {
+                points.push((x as f64, y as f64));
             }
         }
     }
 
-    Ok(TopologyFeatures {
-        branch_points,
-        end_points,
-        isolated_points,
-        total_pixels,
-        image_width: cols as usize,
-        image_height: rows as usize,
-    })
+    let n = points.len();
+    if n < VxPageConfig::pac_min_points_count() {
+        return Ok(f64::MAX);
+    }
+
+    // 计算均值
+    let mut mean_x = 0.0;
+    let mut mean_y = 0.0;
+    for (x, y) in &points {
+        mean_x += x;
+        mean_y += y;
+    }
+    mean_x /= n as f64;
+    mean_y /= n as f64;
+
+    // 协方差矩阵
+    let mut sxx = 0.0;
+    let mut sxy = 0.0;
+    let mut syy = 0.0;
+
+    for (x, y) in &points {
+        let dx = x - mean_x;
+        let dy = y - mean_y;
+        sxx += dx * dx;
+        sxy += dx * dy;
+        syy += dy * dy;
+    }
+
+    sxx /= n as f64;
+    sxy /= n as f64;
+    syy /= n as f64;
+
+    // PCA 主方向（最大特征值对应向量）
+    let theta = 0.5 * (2.0 * sxy).atan2(sxx - syy);
+    let dir_x = theta.cos();
+    let dir_y = theta.sin();
+
+    // 计算平均垂直距离
+    let mut dist_sum = 0.0;
+    for (x, y) in &points {
+        let dx = x - mean_x;
+        let dy = y - mean_y;
+        // 点到直线的垂直距离
+        let dist = (dx * dir_y - dy * dir_x).abs();
+        dist_sum += dist;
+    }
+
+    Ok(dist_sum / n as f64)
+}
+
+
+/// 判断一个连通域中是否存在“真实分支”
+///
+/// 方法：
+/// 1. 计算原始端点数
+/// 2. 枚举每个前景像素作为 block 中心
+/// 3. 删除 block_size × block_size 区域
+/// 4. 若端点数增加 ≥ 3，则认为该位置是分支节点
+fn has_true_branch(component: &Mat, block_size: i32) -> opencv::Result<bool> {
+    let base_endpoints = count_endpoints(component)?;
+
+    let rows = component.rows();
+    let cols = component.cols();
+    let half = block_size / 2;
+
+    for y in 0..rows {
+        for x in 0..cols {
+            // 只在前景像素上尝试
+            if *component.at_2d::<u8>(y, x)? == 0 {
+                continue;
+            }
+
+            // block 左上角、右下角
+            let y0 = y - half;
+            let x0 = x - half;
+            let y1 = y0 + block_size;
+            let x1 = x0 + block_size;
+
+            // 越界直接跳过
+            if y0 < 0 || x0 < 0 || y1 > rows || x1 > cols {
+                continue;
+            }
+
+            // 快速判断：该 block 内是否真的有前景
+            let mut has_fg = false;
+            for yy in y0..y1 {
+                for xx in x0..x1 {
+                    if *component.at_2d::<u8>(yy, xx)? > 0 {
+                        has_fg = true;
+                        break;
+                    }
+                }
+                if has_fg {
+                    break;
+                }
+            }
+            if !has_fg {
+                continue;
+            }
+
+            // 复制一份，模拟“删除该 block”
+            let mut tmp = component.clone();
+            for yy in y0..y1 {
+                for xx in x0..x1 {
+                    *tmp.at_2d_mut::<u8>(yy, xx)? = 0;
+                }
+            }
+
+            // 删除后重新计算端点
+            let new_endpoints = count_endpoints(&tmp)?;
+
+            // 若端点数显著增加，判定为分支
+            if new_endpoints as i32 - base_endpoints as i32 >= 3 {
+                return Ok(true);
+            }
+        }
+    }
+
+    Ok(false)
+}
+
+/// 顺时针 8 邻域（Zhang–Suen 标准顺序）
+///
+/// p0 p1 p2
+/// p7  x p3
+/// p6 p5 p4
+const CN_NEIGHBORS: [(i32, i32); 8] = [
+    (-1,  0), // N
+    (-1,  1), // NE
+    ( 0,  1), // E
+    ( 1,  1), // SE
+    ( 1,  0), // S
+    ( 1, -1), // SW
+    ( 0, -1), // W
+    (-1, -1), // NW
+];
+
+/// 计算某个像素点的 CN（Crossing Number）
+///
+/// CN 定义：
+/// CN = 1/2 * Σ |p_i - p_{i+1}|
+///
+/// 语义：
+/// - CN == 1 → 端点
+/// - CN == 2 → 普通连线点
+/// - CN >= 3 → 分支 / 交叉点
+fn calc_cn(mat: &Mat, y: i32, x: i32) -> opencv::Result<i32> {
+    let mut p = [0i32; 8];
+
+    // 将 8 邻域映射成 0/1
+    for (i, (dy, dx)) in CN_NEIGHBORS.iter().enumerate() {
+        let ny = y + dy;
+        let nx = x + dx;
+        if *mat.at_2d::<u8>(ny, nx)? > 0 {
+            p[i] = 1;
+        }
+    }
+
+    // 计算 crossing number
+    let mut sum = 0;
+    for i in 0..8 {
+        let next = (i + 1) % 8;
+        sum += (p[i] - p[next]).abs();
+    }
+
+    Ok(sum / 2)
+}
+
+/// 统计端点数量
+///
+/// 判定规则：
+/// - 前景像素
+/// - CN == 1
+///
+/// 注意：
+/// - 显式跳过边界，保证 8 邻域访问安全
+fn count_endpoints(mat: &Mat) -> opencv::Result<usize> {
+    let rows = mat.rows();
+    let cols = mat.cols();
+    let mut count = 0;
+
+    for y in 1..rows - 1 {
+        for x in 1..cols - 1 {
+            if *mat.at_2d::<u8>(y, x)? == 0 {
+                continue;
+            }
+
+            let cn = calc_cn(mat, y, x)?;
+            if cn == 1 {
+                count += 1;
+            }
+        }
+    }
+
+    Ok(count)
 }

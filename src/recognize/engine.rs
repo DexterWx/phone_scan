@@ -172,7 +172,8 @@ impl RecEngine {
         // 6. 获取变换矩阵
         let mut src = assist_location.to_points();
         let mut target = page_mark.assist_location.to_points();
-        if src.len() < 4 || target.len() < 4 {
+        
+        if src.len() < 8 || target.len() < 8 {
             src.extend(mark.boundary.to_points());
             target.extend(mark.boundary.to_points());
         }
@@ -192,7 +193,6 @@ impl RecEngine {
 
         // 10. vx识别
         self.rec_vx_module.infer(&baizheng, &mut mobile_output)?;
-        
 
         // 渲染
         #[cfg(debug_assertions)] {
@@ -203,19 +203,19 @@ impl RecEngine {
             let _ = render_quad(
                 &mut render_image, &location, Some(RenderMode::Hollow), None, None
             )?;
-            let debug_path = format!("dev/test_data/debug/{}.jpg", "debug_location");
+            let debug_path = format!("dev/test_data/debug/{}.jpg", "z_debug_location");
             let params = Vector::<i32>::new();
             imwrite(&debug_path, &render_image, &params)
                 .context("保存调试图片失败")?;
 
-            let rgb_path = format!("dev/test_data/debug/{}.jpg", "baizheng_rgb");
+            let rgb_path = format!("dev/test_data/debug/{}.jpg", "z_baizheng_rgb");
             imwrite(&rgb_path, &baizheng.rgb, &params)
                 .context("保存调试图片失败")?;
 
             let mut render_out = baizheng.rgb.clone();
             let _ = render_output(&mut render_out, &mobile_output, &mark.pages[page_index-1].assist_location,Some(RenderMode::Hollow), Some(Colors::orange()), Some(2), Some(1.0));
 
-            let render_out_path = format!("dev/test_data/debug/{}.jpg", "render_out");
+            let render_out_path = format!("dev/test_data/debug/{}.jpg", "z_render_out");
             imwrite(&render_out_path, &render_out, &params)
                 .context("保存调试图片失败")?;
         }

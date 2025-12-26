@@ -132,8 +132,6 @@ class MarkDataProcessor:
             boundary = data["body"]['scanJson']['pages'][0]['objective_scan_area']
             pages = []
             for index,page in enumerate(data["body"]['scanJson']['pages']):
-                if index==2:
-                    break
                 rec_items = []
                 assist_location = {
                     "left": [],
@@ -159,7 +157,7 @@ class MarkDataProcessor:
                         "rec_type": 3,
                         "sub_options": sub_options
                     })
-                if index==0:
+                if index%2==0:
                     for number in page['exam_number']['numbers']:
                         rec_items.append({
                             "rec_type": 1,
@@ -168,9 +166,9 @@ class MarkDataProcessor:
                     assist_location['left']=page['exam_number']['exam_location_left_points'] + assist_location['left']
                     assist_location['right']=page['exam_number']['exam_location_right_points'] + assist_location['right']
                     
-                
-                assist_location['left']+=page['rect_assist_locations']['rect_assist_location_left_points']
-                assist_location['right']+=page['rect_assist_locations']['rect_assist_location_right_points']
+                if "rect_assist_locations" in page:
+                    assist_location['left']+=page['rect_assist_locations']['rect_assist_location_left_points']
+                    assist_location['right']+=page['rect_assist_locations']['rect_assist_location_right_points']
                 
                 pages.append(
                     {

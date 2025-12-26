@@ -112,6 +112,9 @@ pub trait VxConfig {
     fn hsv_lower2_bound() -> Scalar;
     fn hsv_upper1_bound() -> Scalar;
     fn hsv_upper2_bound() -> Scalar;
+    fn lab_a_threshold() -> f64;
+    fn component_min_points() -> usize;
+    fn pac_min_points_count() -> usize;
 }
 
 pub struct VxPageConfig;
@@ -135,4 +138,7 @@ impl VxConfig for VxPageConfig {
     fn hsv_upper2_bound() -> Scalar {
         Scalar::from([180.0, 255.0, 255.0, 0.0])
     }
+    fn lab_a_threshold() -> f64 { 160.0 }
+    fn component_min_points() -> usize { 4 }
+    fn pac_min_points_count() -> usize { 18 }
 }

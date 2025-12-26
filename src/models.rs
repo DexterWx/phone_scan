@@ -242,26 +242,26 @@ pub struct RecOption {
 /// 拓扑特征结构体
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TopologyFeatures {
-    pub branch_points: usize,    // 分支点数量（3+ 邻居）
-    pub end_points: usize,       // 端点数量（1 邻居）
-    pub isolated_points: usize,  // 孤立点（0 邻居）
-    pub total_pixels: usize,     // 总像素数
-    pub image_width: usize,      // 图片宽度
-    pub image_height: usize,     // 图片高度
+    pub connects: Vec<ConnectFeatures>
 }
 
 impl TopologyFeatures {
     pub fn default() -> TopologyFeatures {
         TopologyFeatures {
-            branch_points: 0,
-            end_points: 0,
-            isolated_points: 0,
-            total_pixels: 0,
-            image_width: 0,
-            image_height: 0,
+            connects: vec![]
         }
     }
 }
+
+/// 单一连通域信息
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConnectFeatures {
+    pub points_count: usize,
+    pub has_branch: bool,
+    pub end_points: usize,
+    pub curvature_score: f64
+}
+
 
 /// 输出数据结构
 #[derive(Debug, Clone, Serialize, Deserialize)]
