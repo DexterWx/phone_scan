@@ -153,10 +153,37 @@ class MarkDataProcessor:
                         })
                 for item in page['subjective_items']:
                     sub_options = item['score_rects']
-                    rec_items.append({
-                        "rec_type": 3,
-                        "sub_options": sub_options
-                    })
+                    # 十分位一组
+                    ten_part = []
+                    for option in sub_options:
+                        if option['value'] in ["10", "20", "30", "40", "50", "60", "70", "80", "90"]:
+                            ten_part.append(option)
+                    # 个位数一组
+                    one_part = []
+                    for option in sub_options:
+                        if option['value'] in ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]:
+                            one_part.append(option)
+                    # 小数一组
+                    decimal_part = []
+                    for option in sub_options:
+                        if option['value'] in ["0.1", "0.2", "0.3", "0.4", "0.5", "0.6", "0.7", "0.8", "0.9"]:
+                            decimal_part.append(option)
+                    if ten_part:
+                        rec_items.append({
+                            "rec_type": 3,
+                            "sub_options": ten_part
+                        })
+                    if one_part:
+                        rec_items.append({
+                            "rec_type": 3,
+                            "sub_options": one_part
+                        })
+                    if decimal_part:
+                        rec_items.append({
+                            "rec_type": 3,
+                            "sub_options": decimal_part
+                        })
+                    
                 if index%2==0:
                     for number in page['exam_number']['numbers']:
                         rec_items.append({
