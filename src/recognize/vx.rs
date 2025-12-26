@@ -106,7 +106,12 @@ impl RecVxModule {
         if options.rec_options.len() <= 1 {
             return Ok(());
         }
-        // 2. 如果没有单线
+        // 2. 如果有单线直接返回
+        let line_count = options.rec_options.iter()
+            .filter(|o| o.vx).count();
+        if line_count > 0 {
+            return Ok(());
+        }
         // 有且只有一个option的点数量超过20
         // 将这个唯一的case改为单线
         let mut candidate_index= 0;
