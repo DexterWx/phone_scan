@@ -1,15 +1,51 @@
-use crate::{config::{VxConfig, VxPageConfig}, models::{MobileOutput, ProcessedImage, RecResult, RecType, TopologyFeatures}, myutils::image::{crop_image, det_red_lab, extract_topology_features, preprocess_vx_line, zhang_suen_thinning}};
+use crate::{config::{VxConfig, VxPageConfig}, models::{MobileOutput, ProcessedImage, RecResult, RecType}, myutils::image::{crop_image, det_red_lab}};
 use anyhow::{Ok, Result};
-use opencv::{core::Mat, prelude::MatTraitConst};
+use opencv::{core::{Mat, MatTraitConstManual, Size}, imgproc, prelude::MatTraitConst};
+use tract_onnx::prelude::*;
+use ndarray::{Array4, ArrayViewD};
+use std::sync::Arc;
 
-static mut COUNT: usize = 0;
+// static mut COUNT: usize = 0;
 
-pub struct RecVxModule;
+pub struct RecVxModule {
+    onnx_model: Option<Arc<TypedRunnableModel<Graph<TypedFact, Box<dyn TypedOp>>>>>,
+    dictionary: Option<Vec<String>>,
+}
 
 impl RecVxModule {
-    pub fn new() -> Self {
-        Self
+    pub fn new_paper(model_path: &String) -> Result<Self> {
+        let dictionary = vec!["blank".to_string(), "0".to_string(), "1".to_string()];
+        let onnx_model = Self::load_model(model_path)?;
+        
+        Ok(Self {
+            onnx_model: Some(Arc::new(onnx_model)),
+            dictionary: Some(dictionary),
+        })
     }
+    pub fn new_single() -> Result<Self> {
+        
+        Ok(Self {
+            onnx_model: None,
+            dictionary: None,
+        })
+    }
+
+    pub fn load_model(path: &str) -> Result<TypedRunnableModel<TypedModel>> {
+        let model = tract_onnx::onnx()
+            .model_for_path(path)?
+            .with_input_fact(
+                0,
+                InferenceFact::dt_shape(
+                    f32::datum_type(),
+                    tvec![1, 3, 48, 96], // ✅ 固定宽度
+                ),
+            )?
+            .into_optimized()?
+            .into_runnable()?;   // ✅
+
+        Ok(model)
+    }
+
 
     pub fn infer(&self, process_image: &ProcessedImage, mobile_output: &mut MobileOutput) -> Result<()> {
         for rec_result in mobile_output.rec_results.iter_mut() {
@@ -17,7 +53,7 @@ impl RecVxModule {
                 continue;
             }
             self.rec_options(process_image, rec_result)?;
-            self.refine_options(rec_result)?;
+            // self.refine_options(rec_result)?;
         }
         self.set_vx(mobile_output)?;
 
@@ -25,175 +61,129 @@ impl RecVxModule {
     }
 
     fn rec_options(&self, process_image: &ProcessedImage, options: &mut RecResult) -> Result<()> {
-        
         for rec_option in options.rec_options.iter_mut() {
             let coor = &rec_option.coordinate;
             let sub_image = crop_image(&process_image.rgb, coor)?;
-            let topology = self.extract_topology_from_rgb::<VxPageConfig>(&sub_image)?;
-            
-            let vx_res = self.rec_vx(&topology)?;
+            let red_image = det_red_lab(&sub_image)?;
+            let has_red = self.quick_filter::<VxPageConfig>(&red_image)?;
+            let mut vx_res = false;
+            if has_red {
+                let res = self.infer_single_char(&sub_image)?;
+                if res == "0" {vx_res = true;}
+            }
             rec_option.vx = vx_res;
-            rec_option.topology = Some(topology);
         }
         Ok(())
     }
 
-    fn refine_options(&self, options: &mut RecResult) -> Result<()> {
-        // 第一步，把误判为单线的case改成非单线
-        let _ = self.line_to_other(options);
-        // 第二部，把误判为非单线的case改成单线
-        let _ = self.other_to_line(options);
-        Ok(())
+    pub fn infer_single_char(
+        &self, bgr: &Mat
+    ) -> Result<String> {
+        let onnx_model = self.onnx_model.as_ref().unwrap();
+        // 1. 预处理
+        let input = self.preprocess_for_model(bgr)?;
+
+        // 2. 前向推理
+        let outputs = onnx_model.run(tvec!(input.into()))?;
+
+        // 3. 拿第一个输出
+        let output = outputs[0]
+            .to_array_view::<f32>()?
+            .to_owned();
+
+        // 4. CTC 解码（单字符）
+        let text = self.ctc_decode(output.view())?;
+
+        Ok(text)
     }
 
-    fn line_to_other(&self, options: &mut RecResult) -> Result<()> {
-        // 1. 如果只有一个选项，直接返回，不需要修改。
-        if options.rec_options.len() <= 1 {
-            return Ok(());
-        }
-        // 2. 如果有多个选项是单线
-        // 对比每个option点数最多的连通域的曲率分数，最小的不变，其他的改为非单线。
-
-        // 先计算出最小曲率分数
-        let mut min_score = f64::MAX;
-        for option in options.rec_options.iter_mut() {
-            if !option.vx {
-                continue;
-            }
-            if option.topology.is_none() {
-                continue;
-            }
-            // 找到点数最多的连通域
-            let connect = option.topology.as_ref().unwrap().connects.iter()
-                .max_by_key(|c| c.points_count);
-            if connect.is_none() {
-                continue;   
-            }
-            let connect = connect.unwrap();
-            let score = connect.curvature_score;
-            if score < min_score {
-                min_score = score;
-            }
+    pub fn preprocess_for_model(&self,bgr: &Mat) -> Result<Tensor> {
+        let h = bgr.rows();
+        let w = bgr.cols();
+        if h <= 0 || w <= 0 {
+            anyhow::bail!("invalid image size {}x{}", w, h);
         }
 
-        // 然后把分数大于最小分数的改为非单线
-        for option in options.rec_options.iter_mut() {
-            if !option.vx {
-                continue;
-            }
-            if option.topology.is_none() {
-                continue;
-            }
-            // 找到点数最多的连通域
-            let connect = option.topology.as_ref().unwrap().connects.iter()
-                .max_by_key(|c| c.points_count);
-            if connect.is_none() {
-                continue;   
-            }
-            let connect = connect.unwrap();
-            let score = connect.curvature_score;
-            if score > min_score {
-                option.vx = false;
-            }
+        // Python: imgC=3, imgH=48, imgW=96
+        let img_h = 48;
+        let img_w = 96;
+
+        // 等比缩放（Python 用 int(imgH * ratio)，不是 round）
+        let ratio = w as f32 / h as f32;
+        let mut resized_w = (img_h as f32 * ratio) as i32;
+        if resized_w > img_w {
+            resized_w = img_w;
         }
 
+        // resize
+        let mut resized = Mat::default();
+        imgproc::resize(
+            bgr,
+            &mut resized,
+            Size::new(resized_w, img_h),
+            0.0,
+            0.0,
+            imgproc::INTER_LINEAR,
+        )?;
+        // 确保连续
+        let resized = resized.try_clone()?;
+        let data = resized.data_bytes()?; // BGRBGR...
 
-        Ok(())
+        // padding_im: [1, 3, 48, 96]
+        let mut input = Array4::<f32>::zeros((1, 3, img_h as usize, img_w as usize));
+
+        for y in 0..img_h as usize {
+            for x in 0..resized_w as usize {
+                let idx = (y * resized_w as usize + x) * 3;
+                let b = data[idx] as f32 / 255.0;
+                let g = data[idx + 1] as f32 / 255.0;
+                let r = data[idx + 2] as f32 / 255.0;
+
+                // (x - 0.5) / 0.5
+                input[[0, 0, y, x]] = (b - 0.5) / 0.5;
+                input[[0, 1, y, x]] = (g - 0.5) / 0.5;
+                input[[0, 2, y, x]] = (r - 0.5) / 0.5;
+            }
+        }
+        Ok(input.into_tensor())
     }
 
-    fn other_to_line(&self, options: &mut RecResult) -> Result<()> {
-        // 1. 如果只有一个选项，直接返回，不需要修改。
-        if options.rec_options.len() <= 1 {
-            return Ok(());
-        }
-        // 2. 如果有单线直接返回
-        let line_count = options.rec_options.iter()
-            .filter(|o| o.vx).count();
-        if line_count > 0 {
-            return Ok(());
-        }
-        // 有且只有一个option的点数量超过20
-        // 将这个唯一的case改为单线
-        let mut candidate_index= 0;
-        let mut more20count = 0;
-        for (index, option) in options.rec_options.iter_mut().enumerate() {
-            if option.vx {
-                continue;
-            }
-            if option.topology.is_none() {
-                continue;
-            }
-            let topology = option.topology.as_ref().unwrap();
-            let sum_points: usize = topology.connects.iter().map(|c| c.points_count).sum();
-            if sum_points >= 20 {
-                more20count += 1;
-                candidate_index = index;
-            }
-        }
-        if more20count == 1 {
-            options.rec_options[candidate_index].vx = true;
+    pub fn ctc_decode(
+        &self,
+        output: ArrayViewD<f32>
+    ) -> Result<String> {
+        let dictionary = self.dictionary.as_ref().unwrap();
+        let shape = output.shape();
+        if shape.len() != 3 || shape[0] != 1 {
+            anyhow::bail!("invalid output shape {:?}", shape);
         }
 
-        Ok(())
-    }
+        let time_steps = shape[1];
+        let num_classes = shape[2];
 
-    fn rec_vx(&self, topology: &TopologyFeatures) -> Result<bool> {
-        let is_single = self.is_single_line_from_features::<VxPageConfig>(topology);
-        Ok(is_single)
-    }
+        let mut result = Vec::new();
+        let mut last_index = 0usize;
 
-    fn extract_topology_from_rgb<T: VxConfig>(&self, rgb: &Mat) -> Result<TopologyFeatures> {
-        let red = &det_red_lab(rgb)?;
-        // 步骤 1：快速预筛选
-        if !self.quick_filter::<T>(red)? {
-            return Ok(TopologyFeatures::default());
-        }
+        for t in 0..time_steps {
+            let mut max_idx = 0usize;
+            let mut max_val = output[[0, t, 0]];
 
-        // 步骤 2：预处理
-        let preprocessed = preprocess_vx_line::<T>(red)?;
-
-        // 步骤 3：骨架化
-        let skeleton = zhang_suen_thinning(&preprocessed)?;
-
-        // 步骤 4：提取拓扑特征
-        let features = extract_topology_features(&skeleton)?;
-        #[cfg(debug_assertions)] {
-            unsafe {
-                // if branch_count == 0 && end_count <= 2 {
-                if true {
-                    opencv::imgcodecs::imwrite(
-                        format!("dev/test_data/debug/sk_{:?}_rgb.jpg",
-                            COUNT
-                        ).as_str(),
-                        rgb, &opencv::core::Vector::new()
-                    )?;
-                    opencv::imgcodecs::imwrite(
-                        format!("dev/test_data/debug/sk_{:?}_red.jpg",
-                            COUNT
-                        ).as_str(),
-                        &red, &opencv::core::Vector::new()
-                    )?;
-
-                    let connect_count = features.connects.len();
-                    let branch_count = features.connects.iter().filter(|c| c.has_branch).count();
-                    let end_count = features.connects.iter().map(|c| c.end_points).sum::<usize>();
-                    let connect = features.connects.iter().max_by_key(|c| c.points_count);
-                    let score = connect.map(|c| c.curvature_score).unwrap_or(-1.0);
-                    let sum_points = features.connects.iter().map(|c| c.points_count).sum::<usize>();
-                    opencv::imgcodecs::imwrite(
-                        format!(
-                            "dev/test_data/debug/sk_{:?}_info_{connect_count:?}_{branch_count:?}_{end_count:?}_{score:?}_{sum_points:?}.jpg",
-                            COUNT,
-                        ).as_str(),
-                        &skeleton, &opencv::core::Vector::new()
-                    )?;
-                    COUNT+=1;
+            for c in 1..num_classes {
+                let v = output[[0, t, c]];
+                if v > max_val {
+                    max_val = v;
+                    max_idx = c;
                 }
             }
 
+            if max_idx != 0 && max_idx != last_index {
+                result.push(dictionary[max_idx].clone());
+            }
+
+            last_index = max_idx;
         }
-        
-        Ok(features)
+
+        Ok(result.join(""))
     }
 
     /// 快速预筛选（基于填涂率）
@@ -218,26 +208,6 @@ impl RecVxModule {
         Ok(true)
     }
 
-    /// 基于拓扑特征判断是否为单线
-    fn is_single_line_from_features<T: VxConfig>(&self, features: &TopologyFeatures) -> bool {
-        if features.connects.len() == 0 {
-            return false;
-        }
-        // 端点数检查
-        let total_end_points = features.connects.iter().map(|c| c.end_points).sum::<usize>();
-        if total_end_points > T::max_end_points() {
-            return false;
-        }
-        for connect in features.connects.iter() {
-            // 有分支点
-            if connect.has_branch {
-                return false;
-            }
-        }
-        // 通过所有规则，判定为单线
-        true
-    }
-
     fn set_vx(&self, mobile_output: &mut MobileOutput) -> Result<()> {
         for rec_result in mobile_output.rec_results.iter_mut() {
             if rec_result.rec_type != RecType::Vx {
@@ -254,3 +224,4 @@ impl RecVxModule {
         Ok(())
     }
 }
+

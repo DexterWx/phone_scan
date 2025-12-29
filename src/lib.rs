@@ -32,7 +32,7 @@ mod tests {
 
     #[test]
     fn test_paper() -> Result<()> {
-        let scan_id = "13523";
+        let scan_id = "13513";
         let scan_path = format!("dev/test_data/cards/{scan_id}/test.json");
         let img_path = format!("dev/test_data/cards/{scan_id}/test.jpg");
         let image = imread(&img_path, opencv::imgcodecs::IMREAD_COLOR)?;
@@ -44,6 +44,21 @@ mod tests {
 
         fs::write(format!("dev/test_data/out/{scan_id}.json"), to_json(&res)?)?;
 
+        Ok(())
+    }
+
+    #[test]
+    fn test_vx() -> Result<()> {
+        let scan_id = "13513";
+        let scan_path = format!("dev/test_data/cards/{scan_id}/test.json");
+        let img_path = format!("/Users/xu.wang/Downloads/debug/1_0_input.jpg");
+        let image = imread(&img_path, opencv::imgcodecs::IMREAD_COLOR)?;
+
+        let scan_string = fs::read_to_string(scan_path)?;
+
+        let engine = engine::RecEngine::new_paper(&scan_string)?;
+        let res = engine.rec_vx_module.infer_single_char(&image);
+        println!("识别结果: {}", res?);
         Ok(())
     }
 

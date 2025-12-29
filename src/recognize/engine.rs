@@ -19,7 +19,7 @@ pub struct RecEngine {
     /// 辅助定位模块
     assist_location_module: AssistLocationModule,
     /// 划分识别模块
-    rec_vx_module: RecVxModule,
+    pub rec_vx_module: RecVxModule,
     /// 页码识别模块
     page_number_module: PageNumberModule,
     /// 初始化mark信息
@@ -33,7 +33,7 @@ impl RecEngine {
             location_module: LocationModule::new(),
             assist_location_module: AssistLocationModule::new(),
             rec_fill_module: RecFillModule::new(),
-            rec_vx_module: RecVxModule::new(),
+            rec_vx_module: RecVxModule::new_single()?,
             page_number_module: PageNumberModule::new(),
             mark_single: Some(from_json(mobile_input)?),
             mark_paper: None
@@ -47,7 +47,7 @@ impl RecEngine {
             location_module: LocationModule::new(),
             assist_location_module: AssistLocationModule::new(),
             rec_fill_module: RecFillModule::new(),
-            rec_vx_module: RecVxModule::new(),
+            rec_vx_module: RecVxModule::new_paper(&mark_paper.vx_model_path)?,
             page_number_module: PageNumberModule::new(),
             mark_paper: Some(mark_paper),
             mark_single: None

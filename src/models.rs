@@ -317,6 +317,7 @@ pub struct InitInfo {
 /// 整卷标注信息
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MarkPaper {
+    pub vx_model_path: String,
     /// 外围矩形边框
     pub boundary: Coordinate,
     /// 页码点
@@ -331,6 +332,7 @@ impl MarkPaper {
     }
     pub fn resize(&self, scale: f64) -> MarkPaper {
         MarkPaper {
+            vx_model_path: self.vx_model_path.clone(),
             boundary: self.boundary.resize(scale),
             page_number: self.page_number.iter().map(|coor| coor.resize(scale)).collect(),
             pages: self.pages.iter().map(|page| page.resize(scale)).collect(),
