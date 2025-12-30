@@ -86,7 +86,7 @@ class ImageConverter:
                 image = image.convert('RGB')
             
             # 保存为JPG格式，不包含EXIF信息避免重复旋转
-            image.save(output_path, 'JPEG', quality=95, optimize=True)
+            image.save(output_path, 'JPEG', quality=100, optimize=True)
             return True
         except Exception as e:
             print(f"图片转换失败: {e}")

@@ -234,23 +234,7 @@ pub struct RecResult {
 pub struct RecOption {
     pub fill_rate: f64,
     pub coordinate: Coordinate,
-    pub vx: bool,
-    pub topology: Option<TopologyFeatures>
-
-}
-
-/// 拓扑特征结构体
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TopologyFeatures {
-    pub connects: Vec<ConnectFeatures>
-}
-
-impl TopologyFeatures {
-    pub fn default() -> TopologyFeatures {
-        TopologyFeatures {
-            connects: vec![]
-        }
-    }
+    pub vx: bool
 }
 
 /// 单一连通域信息
@@ -288,8 +272,7 @@ impl MobileOutput {
                         |coordinate| RecOption {
                             fill_rate: 0.0,
                             coordinate: coordinate.clone(),
-                            vx: false,
-                            topology: None
+                            vx: false
                         }
                     ).collect(),
                     rec_type: rec_item.rec_type
@@ -323,8 +306,13 @@ pub struct MarkPaper {
     /// 页码点
     pub page_number: Vec<Coordinate>,
     /// 页面信息
-    pub pages: Vec<MarkPage>
+    pub pages: Vec<MarkPage>,
+    /// vx识别线程数，默认1
+    #[serde(default = "default_num_threads")]
+    pub num_threads: usize
 }
+
+fn default_num_threads() -> usize { 1 }
 
 impl MarkPaper {
     pub fn is_a4(&self) -> bool {
@@ -336,6 +324,7 @@ impl MarkPaper {
             boundary: self.boundary.resize(scale),
             page_number: self.page_number.iter().map(|coor| coor.resize(scale)).collect(),
             pages: self.pages.iter().map(|page| page.resize(scale)).collect(),
+            num_threads: self.num_threads
         }
     }
     pub fn init_sort(&mut self) {

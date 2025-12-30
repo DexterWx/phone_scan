@@ -3,7 +3,7 @@ use opencv::{
 };
 use base64::{Engine as _, engine::general_purpose};
 use anyhow::{Result, Context};
-use crate::{config::{VxConfig, VxPageConfig}, models::{ConnectFeatures, Coordinate, ProcessedImage, TopologyFeatures}};
+use crate::{config::{VxConfig, VxPageConfig}, models::{ConnectFeatures, Coordinate, ProcessedImage}};
 use crate::config::ImageProcessingConfig;
 
 pub fn read_image(input: &String) -> Result<Mat> {
@@ -541,85 +541,85 @@ pub fn preprocess_vx_line<T: VxConfig>(image: &Mat) -> Result<Mat> {
 }
 
 
-/// 从骨架图中提取拓扑特征：
-/// - 每个连通域单独分析
-/// - 统计点数、端点数
-/// - 判断是否存在“真实分支”
-pub fn extract_topology_features(skeleton: &Mat) -> opencv::Result<TopologyFeatures> {
-    let mut labels = Mat::default();
-    let mut stats = Mat::default();
-    let mut centroids = Mat::default();
+// /// 从骨架图中提取拓扑特征：
+// /// - 每个连通域单独分析
+// /// - 统计点数、端点数
+// /// - 判断是否存在“真实分支”
+// pub fn extract_topology_features(skeleton: &Mat) -> opencv::Result<TopologyFeatures> {
+//     let mut labels = Mat::default();
+//     let mut stats = Mat::default();
+//     let mut centroids = Mat::default();
 
-    // 8 邻域连通域标记
-    let num = imgproc::connected_components_with_stats(
-        skeleton,
-        &mut labels,
-        &mut stats,
-        &mut centroids,
-        8,
-        CV_32S,
-    )?;
+//     // 8 邻域连通域标记
+//     let num = imgproc::connected_components_with_stats(
+//         skeleton,
+//         &mut labels,
+//         &mut stats,
+//         &mut centroids,
+//         8,
+//         CV_32S,
+//     )?;
 
-    let mut features = TopologyFeatures::default();
+//     let mut features = TopologyFeatures::default();
 
-    for label in 1..num {
-        let points_count =
-            *stats.at_2d::<i32>(label, imgproc::CC_STAT_AREA)? as usize;
+//     for label in 1..num {
+//         let points_count =
+//             *stats.at_2d::<i32>(label, imgproc::CC_STAT_AREA)? as usize;
 
-        if points_count < VxPageConfig::component_min_points() {
-            continue;
-        }
-        // 直接从 stats 里拿 bounding box
-        let mut x = *stats.at_2d::<i32>(label, imgproc::CC_STAT_LEFT)?;
-        let mut y = *stats.at_2d::<i32>(label, imgproc::CC_STAT_TOP)?;
-        let mut w = *stats.at_2d::<i32>(label, imgproc::CC_STAT_WIDTH)?;
-        let mut h = *stats.at_2d::<i32>(label, imgproc::CC_STAT_HEIGHT)?;
+//         if points_count < VxPageConfig::component_min_points() {
+//             continue;
+//         }
+//         // 直接从 stats 里拿 bounding box
+//         let mut x = *stats.at_2d::<i32>(label, imgproc::CC_STAT_LEFT)?;
+//         let mut y = *stats.at_2d::<i32>(label, imgproc::CC_STAT_TOP)?;
+//         let mut w = *stats.at_2d::<i32>(label, imgproc::CC_STAT_WIDTH)?;
+//         let mut h = *stats.at_2d::<i32>(label, imgproc::CC_STAT_HEIGHT)?;
 
-        if w <= 0 || h <= 0 {
-            continue;
-        }
+//         if w <= 0 || h <= 0 {
+//             continue;
+//         }
 
-        // 向外扩 1 像素（注意边界）
-        let expand = 2;
+//         // 向外扩 1 像素（注意边界）
+//         let expand = 2;
 
-        let x0 = (x - expand).max(0);
-        let y0 = (y - expand).max(0);
+//         let x0 = (x - expand).max(0);
+//         let y0 = (y - expand).max(0);
 
-        let x1 = (x + w + expand).min(skeleton.cols());
-        let y1 = (y + h + expand).min(skeleton.rows());
+//         let x1 = (x + w + expand).min(skeleton.cols());
+//         let y1 = (y + h + expand).min(skeleton.rows());
 
-        x = x0;
-        y = y0;
-        w = x1 - x0;
-        h = y1 - y0;
+//         x = x0;
+//         y = y0;
+//         w = x1 - x0;
+//         h = y1 - y0;
 
-        // 在 bbox 内构建 component（而不是整张图）
-        let mut component = Mat::zeros(h, w, skeleton.typ())?.to_mat()?;
+//         // 在 bbox 内构建 component（而不是整张图）
+//         let mut component = Mat::zeros(h, w, skeleton.typ())?.to_mat()?;
 
-        for yy in 0..h {
-            for xx in 0..w {
-                let ly = y + yy;
-                let lx = x + xx;
-                if *labels.at_2d::<i32>(ly, lx)? == label {
-                    *component.at_2d_mut::<u8>(yy, xx)? = 255;
-                }
-            }
-        }
+//         for yy in 0..h {
+//             for xx in 0..w {
+//                 let ly = y + yy;
+//                 let lx = x + xx;
+//                 if *labels.at_2d::<i32>(ly, lx)? == label {
+//                     *component.at_2d_mut::<u8>(yy, xx)? = 255;
+//                 }
+//             }
+//         }
         
-        let end_points = count_endpoints(&component)?;
-        let has_branch = has_true_branch(&component, 3)?;
-        let curvature_score = pca_line_error(&component)?;
+//         let end_points = count_endpoints(&component)?;
+//         let has_branch = has_true_branch(&component, 3)?;
+//         let curvature_score = pca_line_error(&component)?;
 
-        features.connects.push(ConnectFeatures {
-            points_count,
-            has_branch,
-            end_points,
-            curvature_score,
-        });
-    }
+//         features.connects.push(ConnectFeatures {
+//             points_count,
+//             has_branch,
+//             end_points,
+//             curvature_score,
+//         });
+//     }
 
-    Ok(features)
-}
+//     Ok(features)
+// }
 
 /// 基于 PCA 的直线拟合误差
 /// 返回：平均点到主轴的垂直距离

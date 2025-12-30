@@ -207,6 +207,7 @@ class MarkDataProcessor:
             
             return {
                 "vx_model_path": "models/model.onnx",
+                "num_threads": 1,
                 "boundary": boundary,
                 "page_number": data["body"]['scanJson']['pages'][0]['page_number_points'],
                 "pages": pages

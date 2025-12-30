@@ -1,32 +1,37 @@
-use crate::{config::{VxConfig, VxPageConfig}, models::{MobileOutput, ProcessedImage, RecResult, RecType}, myutils::image::{crop_image, det_red_lab}};
+use crate::{config::{VxConfig, VxPageConfig}, models::{Coordinate, MobileOutput, ProcessedImage, RecResult, RecType}, myutils::image::{crop_image, det_red_lab}};
 use anyhow::{Ok, Result};
 use opencv::{core::{Mat, MatTraitConstManual, Size}, imgproc, prelude::MatTraitConst};
 use tract_onnx::prelude::*;
 use ndarray::{Array4, ArrayViewD};
-use std::sync::Arc;
-
-// static mut COUNT: usize = 0;
+use std::{sync::Arc, thread::Thread};
+use rayon::prelude::*;
 
 pub struct RecVxModule {
     onnx_model: Option<Arc<TypedRunnableModel<Graph<TypedFact, Box<dyn TypedOp>>>>>,
     dictionary: Option<Vec<String>>,
+    pool: Option<rayon::ThreadPool>,
 }
 
 impl RecVxModule {
-    pub fn new_paper(model_path: &String) -> Result<Self> {
+    pub fn new_paper(model_path: &String, num_threads: usize) -> Result<Self> {
         let dictionary = vec!["blank".to_string(), "0".to_string(), "1".to_string()];
         let onnx_model = Self::load_model(model_path)?;
-        
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(num_threads)
+            .build()?;
+
         Ok(Self {
             onnx_model: Some(Arc::new(onnx_model)),
             dictionary: Some(dictionary),
+            pool: Some(pool),
         })
     }
+
     pub fn new_single() -> Result<Self> {
-        
         Ok(Self {
             onnx_model: None,
             dictionary: None,
+            pool: None,
         })
     }
 
@@ -69,10 +74,58 @@ impl RecVxModule {
             let mut vx_res = false;
             if has_red {
                 let res = self.infer_single_char(&sub_image)?;
-                if res == "0" {vx_res = true;}
+                if res == "0" { vx_res = true; }
             }
             rec_option.vx = vx_res;
         }
+        Ok(())
+    }
+
+    /// 并行推理：将所有 rec_results 中的 Vx 类型 options 扁平化后并行处理
+    pub fn infer_parallel(&self, process_image: &ProcessedImage, mobile_output: &mut MobileOutput) -> Result<()> {
+        // 1. 收集所有需要处理的 Vx 类型的 (rec_idx, opt_idx, coordinate)
+        let tasks: Vec<(usize, usize, Coordinate)> = mobile_output.rec_results
+            .iter()
+            .enumerate()
+            .filter(|(_, r)| r.rec_type == RecType::Vx)
+            .flat_map(|(rec_idx, r)| {
+                r.rec_options.iter().enumerate().map(move |(opt_idx, opt)| {
+                    (rec_idx, opt_idx, opt.coordinate.clone())
+                })
+            })
+            .collect();
+
+        if tasks.is_empty() {
+            return Ok(());
+        }
+
+        // 2. 串行裁剪所有子图像
+        let sub_images: Vec<_> = tasks.iter()
+            .map(|(_, _, coor)| crop_image(&process_image.rgb, coor))
+            .collect::<Result<Vec<_>>>()?;
+
+        // 3. 在函数内创建线程池，并行处理
+        let pool = self.pool.as_ref().unwrap();
+
+        let results: Vec<bool> = pool.install(|| {
+            sub_images
+                .par_iter()
+            .map(|sub_image| {
+                    let res = self.infer_single_char(sub_image).ok()?;
+                    Some(res == "0")
+                })
+                .map(|opt| opt.unwrap_or(false))
+                .collect()
+        });
+
+        // 4. 回写结果
+        for ((rec_idx, opt_idx, _), vx_res) in tasks.iter().zip(results) {
+            mobile_output.rec_results[*rec_idx].rec_options[*opt_idx].vx = vx_res;
+        }
+
+        // 5. 设置最终结果
+        self.set_vx(mobile_output)?;
+
         Ok(())
     }
 

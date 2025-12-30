@@ -4,6 +4,7 @@ use crate::models::Coordinate;
 use crate::models::AssistLocation;
 use crate::models::ProcessedImage;
 use crate::myutils::image::merge_coordinates;
+use crate::myutils::rendering::render_coordinates;
 use anyhow::Ok;
 use anyhow::Result;
 use opencv::core::Mat;
