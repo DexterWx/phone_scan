@@ -6,6 +6,8 @@ use ndarray::{Array4, ArrayViewD};
 use std::{sync::Arc, thread::Thread};
 use rayon::prelude::*;
 
+static mut COUNT: i32 = 0;
+
 pub struct RecVxModule {
     onnx_model: Option<Arc<TypedRunnableModel<Graph<TypedFact, Box<dyn TypedOp>>>>>,
     dictionary: Option<Vec<String>>,
@@ -42,11 +44,11 @@ impl RecVxModule {
                 0,
                 InferenceFact::dt_shape(
                     f32::datum_type(),
-                    tvec![1, 3, 48, 96], // ✅ 固定宽度
+                    tvec![1, 3, 28, 42], // TinyCNN 输入尺寸
                 ),
             )?
             .into_optimized()?
-            .into_runnable()?;   // ✅
+            .into_runnable()?;
 
         Ok(model)
     }
@@ -69,14 +71,24 @@ impl RecVxModule {
         for rec_option in options.rec_options.iter_mut() {
             let coor = &rec_option.coordinate;
             let sub_image = crop_image(&process_image.rgb, coor)?;
+            
             let red_image = det_red_lab(&sub_image)?;
             let has_red = self.quick_filter::<VxPageConfig>(&red_image)?;
             let mut vx_res = false;
             if has_red {
-                let res = self.infer_single_char(&sub_image)?;
-                if res == "0" { vx_res = true; }
+                let res = self.infer_tiny_cnn(&sub_image)?;
+                if res == 0 { vx_res = true; }
             }
             rec_option.vx = vx_res;
+            // unsafe {
+            //     COUNT += 1;
+            //     let out_path = format!("dev/test_data/debug/vx_{:?}_{vx_res:?}.jpg", COUNT);
+            //     opencv::imgcodecs::imwrite(&out_path, &sub_image, &Default::default())?;
+            //     if has_red {
+            //         let out_path = format!("dev/test_data/debug/vx_{:?}_red.jpg", COUNT);
+            //         opencv::imgcodecs::imwrite(&out_path, &red_image, &Default::default())?;
+            //     }
+            // }
         }
         Ok(())
     }
@@ -111,8 +123,8 @@ impl RecVxModule {
             sub_images
                 .par_iter()
             .map(|sub_image| {
-                    let res = self.infer_single_char(sub_image).ok()?;
-                    Some(res == "0")
+                    let res = self.infer_tiny_cnn(sub_image).ok()?;
+                    Some(res == 0)
                 })
                 .map(|opt| opt.unwrap_or(false))
                 .collect()
@@ -129,114 +141,114 @@ impl RecVxModule {
         Ok(())
     }
 
-    pub fn infer_single_char(
-        &self, bgr: &Mat
-    ) -> Result<String> {
+    /// 新的分类模型推理：0=single（单线），1=cancel（非单线）
+    pub fn infer_tiny_cnn(&self, bgr: &Mat) -> Result<usize> {
         let onnx_model = self.onnx_model.as_ref().unwrap();
-        // 1. 预处理
-        let input = self.preprocess_for_model(bgr)?;
+
+        // 1. 预处理（保持比例resize + padding）
+        let input = self.preprocess_for_tiny_cnn(bgr)?;
 
         // 2. 前向推理
         let outputs = onnx_model.run(tvec!(input.into()))?;
 
-        // 3. 拿第一个输出
-        let output = outputs[0]
-            .to_array_view::<f32>()?
-            .to_owned();
+        // 3. 拿第一个输出 [1, 2]
+        let output = outputs[0].to_array_view::<f32>()?;
 
-        // 4. CTC 解码（单字符）
-        let text = self.ctc_decode(output.view())?;
+        // 4. Softmax + Argmax
+        let class_id = self.classify(output)?;
 
-        Ok(text)
+        // 0=single（单线）返回true，1=cancel（非单线）返回false
+        Ok(class_id)
     }
 
-    pub fn preprocess_for_model(&self,bgr: &Mat) -> Result<Tensor> {
+    /// TinyCNN 预处理：保持宽高比 resize + 居中 padding
+    /// Python: img_height=28, img_width=42, pad_value=1.0 (白色)
+    pub fn preprocess_for_tiny_cnn(&self, bgr: &Mat) -> Result<Tensor> {
         let h = bgr.rows();
         let w = bgr.cols();
         if h <= 0 || w <= 0 {
             anyhow::bail!("invalid image size {}x{}", w, h);
         }
 
-        // Python: imgC=3, imgH=48, imgW=96
-        let img_h = 48;
-        let img_w = 96;
+        // 目标尺寸
+        let img_h = 28;
+        let img_w = 42;
 
-        // 等比缩放（Python 用 int(imgH * ratio)，不是 round）
-        let ratio = w as f32 / h as f32;
-        let mut resized_w = (img_h as f32 * ratio) as i32;
-        if resized_w > img_w {
-            resized_w = img_w;
-        }
+        // 计算缩放比例，保持宽高比
+        let scale = f32::min(img_w as f32 / w as f32, img_h as f32 / h as f32);
+        let new_w = (w as f32 * scale) as i32;
+        let new_h = (h as f32 * scale) as i32;
 
-        // resize
+        // Resize
         let mut resized = Mat::default();
         imgproc::resize(
             bgr,
             &mut resized,
-            Size::new(resized_w, img_h),
+            Size::new(new_w, new_h),
             0.0,
             0.0,
             imgproc::INTER_LINEAR,
         )?;
+
         // 确保连续
         let resized = resized.try_clone()?;
         let data = resized.data_bytes()?; // BGRBGR...
 
-        // padding_im: [1, 3, 48, 96]
+        // 创建 padding 后的 tensor [1, 3, 28, 42]，填充值为1.0（白色）
         let mut input = Array4::<f32>::zeros((1, 3, img_h as usize, img_w as usize));
 
-        for y in 0..img_h as usize {
-            for x in 0..resized_w as usize {
-                let idx = (y * resized_w as usize + x) * 3;
+        // 计算居中偏移
+        let y_offset = ((img_h - new_h) / 2) as usize;
+        let x_offset = ((img_w - new_w) / 2) as usize;
+
+        // 填充 resized 图像到中心
+        for y in 0..new_h as usize {
+            for x in 0..new_w as usize {
+                let idx = (y * new_w as usize + x) * 3;
                 let b = data[idx] as f32 / 255.0;
                 let g = data[idx + 1] as f32 / 255.0;
                 let r = data[idx + 2] as f32 / 255.0;
 
-                // (x - 0.5) / 0.5
-                input[[0, 0, y, x]] = (b - 0.5) / 0.5;
-                input[[0, 1, y, x]] = (g - 0.5) / 0.5;
-                input[[0, 2, y, x]] = (r - 0.5) / 0.5;
+                // 注意：OpenCV的BGR顺序 → 模型输入RGB顺序
+                input[[0, 0, y_offset + y, x_offset + x]] = r;
+                input[[0, 1, y_offset + y, x_offset + x]] = g;
+                input[[0, 2, y_offset + y, x_offset + x]] = b;
             }
         }
+
         Ok(input.into_tensor())
     }
 
-    pub fn ctc_decode(
-        &self,
-        output: ArrayViewD<f32>
-    ) -> Result<String> {
-        let dictionary = self.dictionary.as_ref().unwrap();
+    /// 分类：Softmax + Argmax
+    pub fn classify(&self, output: ArrayViewD<f32>) -> Result<usize> {
         let shape = output.shape();
-        if shape.len() != 3 || shape[0] != 1 {
-            anyhow::bail!("invalid output shape {:?}", shape);
+        if shape.len() != 2 || shape[0] != 1 {
+            anyhow::bail!("invalid output shape {:?}, expected [1, 2]", shape);
         }
 
-        let time_steps = shape[1];
-        let num_classes = shape[2];
-
-        let mut result = Vec::new();
-        let mut last_index = 0usize;
-
-        for t in 0..time_steps {
-            let mut max_idx = 0usize;
-            let mut max_val = output[[0, t, 0]];
-
-            for c in 1..num_classes {
-                let v = output[[0, t, c]];
-                if v > max_val {
-                    max_val = v;
-                    max_idx = c;
-                }
-            }
-
-            if max_idx != 0 && max_idx != last_index {
-                result.push(dictionary[max_idx].clone());
-            }
-
-            last_index = max_idx;
+        let num_classes = shape[1];
+        if num_classes != 2 {
+            anyhow::bail!("expected 2 classes, got {}", num_classes);
         }
 
-        Ok(result.join(""))
+        // Softmax
+        let logit0 = output[[0, 0]];
+        let logit1 = output[[0, 1]];
+
+        let max_logit = f32::max(logit0, logit1);
+        let exp0 = (logit0 - max_logit).exp();
+        let exp1 = (logit1 - max_logit).exp();
+        let sum_exp = exp0 + exp1;
+
+        let prob0 = exp0 / sum_exp;
+        let prob1 = exp1 / sum_exp;
+
+        // Argmax
+        if prob0 > prob1 {
+            Ok(0)
+        } else {
+            Ok(1)
+        }
     }
 
     /// 快速预筛选（基于填涂率）

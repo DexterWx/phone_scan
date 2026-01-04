@@ -74,4 +74,5 @@ __pycache__/
 dev/test_data/*
 
 # model
+models/
 models/model.onnx

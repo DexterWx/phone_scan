@@ -168,6 +168,11 @@ class MarkDataProcessor:
                     for option in sub_options:
                         if option['value'] in ["0.1", "0.2", "0.3", "0.4", "0.5", "0.6", "0.7", "0.8", "0.9"]:
                             decimal_part.append(option)
+                    # 判断
+                    tf_part = []
+                    for option in sub_options:
+                        if option['value'] in ["√", "乄","×"]:
+                            tf_part.append(option)
                     if ten_part:
                         rec_items.append({
                             "rec_type": 3,
@@ -182,6 +187,11 @@ class MarkDataProcessor:
                         rec_items.append({
                             "rec_type": 3,
                             "sub_options": decimal_part
+                        })
+                    if tf_part:
+                        rec_items.append({
+                            "rec_type": 3,
+                            "sub_options": tf_part
                         })
                     
                 if index%2==0:
@@ -206,7 +216,7 @@ class MarkDataProcessor:
             
             
             return {
-                "vx_model_path": "models/model.onnx",
+                "vx_model_path": "models/tiny-cnn.onnx",
                 "num_threads": 1,
                 "boundary": boundary,
                 "page_number": data["body"]['scanJson']['pages'][0]['page_number_points'],
