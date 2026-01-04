@@ -192,13 +192,9 @@ impl RecEngine {
         self.rec_fill_module.infer::<FillPageConfig>(&baizheng, &mut mobile_output)?;
 
         // 10. vx识别
-        if mark.num_threads > 1 {
-            println!("多线程 {:?}", mark.num_threads);
-            self.rec_vx_module.infer_parallel(&baizheng, &mut mobile_output)?;
-        } else {
-            println!("单线程 {:?}", mark.num_threads);
-            self.rec_vx_module.infer(&baizheng, &mut mobile_output)?;
-        }
+        println!("多线程 {:?}", mark.num_threads);
+        self.rec_vx_module.infer_parallel(&baizheng, &mut mobile_output)?;
+        
         // 渲染
         #[cfg(debug_assertions)] {
             use opencv::{core::Vector, imgcodecs::imwrite};
