@@ -134,7 +134,7 @@ impl LocationModule {
     }
 
     /// 对四边形的四个顶点进行排序，确保按顺时针方向排列，从左上角开始
-    fn order_points(pts: &mut [Point2i; 4]) {
+    pub fn order_points(pts: &mut [Point2i; 4]) {
         // 计算质心
         let centroid_x = (pts[0].x + pts[1].x + pts[2].x + pts[3].x) as f32 / 4.0;
         let centroid_y = (pts[0].y + pts[1].y + pts[2].y + pts[3].y) as f32 / 4.0;

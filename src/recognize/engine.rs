@@ -61,6 +61,7 @@ impl RecEngine {
         
         // 2. 处理图片
         let processed_image = process_image(&image, ImageProcessingConfig::TARGET_WIDTH_A4)?;
+        let mut baizheng = processed_image.clone();
         
         // 3. 定位检测
         let location = self.location_module.infer(&processed_image)?;
@@ -69,8 +70,8 @@ impl RecEngine {
         let pers_trans_matrix = get_perspective_transform_matrix_with_boundary(&location.to_points(), &mark.boundary.to_points())?;
 
         // 5. 第一次变换
-        let baizheng = pers_trans_image(
-            &processed_image, &pers_trans_matrix, mark.boundary.x+mark.boundary.w, mark.boundary.y+mark.boundary.h
+        pers_trans_image(
+            &mut baizheng, &pers_trans_matrix, mark.boundary.x+mark.boundary.w, mark.boundary.y+mark.boundary.h
         )?;
 
         // 6. 找到辅助定位点
@@ -86,8 +87,8 @@ impl RecEngine {
         let pers_trans_matrix = get_perspective_transform_matrix_with_points(&src, &target)?;
         
         // 8. 第二次变换
-        let baizheng = pers_trans_image(
-            &baizheng, &pers_trans_matrix, mark.boundary.x+mark.boundary.w, mark.boundary.y+mark.boundary.h
+        pers_trans_image(
+            &mut baizheng, &pers_trans_matrix, mark.boundary.x+mark.boundary.w, mark.boundary.y+mark.boundary.h
         )?;
 
         // 9. 填涂识别
@@ -149,6 +150,7 @@ impl RecEngine {
 
         // 1. 处理图片
         let processed_image = process_image(&image, target_width)?;
+        let mut baizheng = processed_image.clone();
         
         // 2. 定位检测
         let location = self.location_module.infer(&processed_image)?;
@@ -158,8 +160,8 @@ impl RecEngine {
         let pers_trans_matrix = get_perspective_transform_matrix_with_boundary(&location.to_points(), &tg_boundary.to_points())?;
         
         // 4. 第一次变换
-        let baizheng = pers_trans_image(
-            &processed_image, &pers_trans_matrix, tg_boundary.x+tg_boundary.w, tg_boundary.y+tg_boundary.h
+        pers_trans_image(
+            &mut baizheng, &pers_trans_matrix, tg_boundary.x+tg_boundary.w, tg_boundary.y+tg_boundary.h
         )?;
 
         let page_index = self.page_number_module.infer(&baizheng, &mark.page_number)?;
@@ -180,8 +182,8 @@ impl RecEngine {
         let pers_trans_matrix = get_perspective_transform_matrix_with_points(&src, &target)?;
         
         // 7. 第二次变换
-        let baizheng = pers_trans_image(
-            &baizheng, &pers_trans_matrix, mark.boundary.x+mark.boundary.w, mark.boundary.y+mark.boundary.h
+        pers_trans_image(
+            &mut baizheng, &pers_trans_matrix, mark.boundary.x+mark.boundary.w, mark.boundary.y+mark.boundary.h
         )?;
 
         // 8. 初始化输出
@@ -190,6 +192,10 @@ impl RecEngine {
         
         // 9. 填涂识别
         self.rec_fill_module.infer::<FillPageConfig>(&baizheng, &mut mobile_output)?;
+
+        // 9.5 vx区矫正
+        // self.rec_vx_module.refine_image(&mut baizheng, &mut mobile_output, mark)?;
+        self.rec_vx_module.refine_all_coordinates(&baizheng.closed, &mut mobile_output, 8, 2)?;
 
         // 10. vx识别
         if mark.num_threads > 1 {

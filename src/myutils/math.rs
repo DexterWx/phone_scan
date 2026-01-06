@@ -1,3 +1,7 @@
+use anyhow::Ok;
+use opencv::core::Point2f;
+use anyhow::Result;
+
 /// 实现Otsu阈值算法，用于计算一维直方图的最佳分割阈值
 /// Otsu算法通过最大化类间方差来确定最佳阈值，适用于双峰直方图
 
@@ -75,4 +79,38 @@ pub fn otsu_threshold(values: &[f64]) -> (f64, f64) {
     }
     
     (best_threshold, max_variance)
+}
+
+/// 第二个点集数量>=第一个点集数量
+/// 返回点集数量和第一个点集数量相同
+/// 给第一个点集的每个点匹配一个距离最近的点，从第二个点集里找。
+/// 这些距离最近的点的集合顺序和第一个点集的顺序一致
+
+pub fn match_points(points1: &Vec<Point2f>, points2: &Vec<Point2f>) -> Result<Vec<Point2f>> { 
+    if points1.len() > points2.len() {
+        anyhow::bail!("划分矫正数量不匹配");
+    }
+    let mut res = Vec::new();
+    for point1 in points1 {
+        let mut min_distance = f32::MAX;
+        let mut min_index = 0;
+        for (index, point2) in points2.iter().enumerate() {
+            let distance = distance(point1, point2);
+            if distance < min_distance {
+                min_distance = distance;
+                min_index = index;
+            }
+        }
+        
+        res.push(points2[min_index]);
+    }
+
+    Ok(res)
+}
+
+
+fn distance(point1: &Point2f, point2: &Point2f) -> f32 {
+    let dx = point1.x - point2.x;
+    let dy = point1.y - point2.y;
+    return (dx * dx + dy * dy).sqrt();
 }

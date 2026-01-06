@@ -119,7 +119,7 @@ pub trait VxConfig {
 
 pub struct VxPageConfig;
 impl VxConfig for VxPageConfig {
-    fn fill_ratio_min() -> f64 { 0.01 }
+    fn fill_ratio_min() -> f64 { 0.00 }
     fn fill_ratio_max() -> f64 { 1.00 }
     fn preprocess_close_kernel_size() -> i32 { 3 }
     fn preprocess_open_kernel_size() -> i32 { 1 }

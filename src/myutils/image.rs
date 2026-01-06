@@ -160,11 +160,11 @@ pub fn get_points_from_coordinates(coors: &Vec<Coordinate>) -> Vector<Point2f> {
 
 /// 透视变换
 pub fn pers_trans_image(
-    processed_image: &ProcessedImage,
+    processed_image: &mut ProcessedImage,
     transform_matrix: &Mat,
     target_w: i32,
     target_h: i32
-) -> Result<ProcessedImage> {
+) -> Result<()> {
     // 对所有图像应用透视变换
     let mut rgb_warped = Mat::default();
     imgproc::warp_perspective(
@@ -210,12 +210,12 @@ pub fn pers_trans_image(
         opencv::core::Scalar::default(),
     ).context("应用透视变换到形态学处理图失败")?;
 
-    Ok(ProcessedImage {
-        rgb: rgb_warped,
-        gray: gray_warped,
-        thresh: thresh_warped,
-        closed: closed_warped,
-    })
+    processed_image.rgb = rgb_warped;
+    processed_image.gray = gray_warped;
+    processed_image.thresh = thresh_warped;
+    processed_image.closed = closed_warped;
+
+    Ok(())
 }
 
 

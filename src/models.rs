@@ -36,6 +36,13 @@ impl Coordinate {
         points.push(Point2f::new(self.x as f32, (self.y + self.h) as f32));
         points
     }
+
+    pub fn get_center(&self) -> Point2f {
+        Point2f {
+            x: (self.x + self.w / 2) as f32,
+            y: (self.y + self.h / 2) as f32,
+        }
+    }
 }
 
 /// 非矩形四边形
@@ -53,6 +60,28 @@ impl Quad {
         }
         points
     }
+
+    pub fn to_coordinate(&self) -> Coordinate {
+        Coordinate {
+            x: self.points[0].x,
+            y: self.points[0].y,
+            w: self.points[1].x - self.points[0].x,
+            h: self.points[2].y - self.points[0].y,
+        }
+    }
+
+    pub fn get_center(&self) -> Point2f {
+        let mut sum_x = 0f32;
+        let mut sum_y = 0f32;
+        for point in &self.points {
+            sum_x += point.x as f32;
+            sum_y += point.y as f32;
+        }
+        Point2f {
+            x: sum_x / 4f32,
+            y: sum_y / 4f32,
+        }
+    }
 }
 
 /// 轮廓信息，包含额外的检测数据
@@ -65,7 +94,7 @@ pub struct ContourInfo {
 }
 
 /// 处理后的图片数据
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ProcessedImage {
     pub rgb: opencv::core::Mat,
     /// 灰度图
