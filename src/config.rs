@@ -115,12 +115,13 @@ pub trait VxConfig {
     fn lab_a_threshold() -> f64;
     fn component_min_points() -> usize;
     fn pac_min_points_count() -> usize;
+    fn vx_box_expand_size() -> i32;
 }
 
 pub struct VxPageConfig;
 impl VxConfig for VxPageConfig {
-    fn fill_ratio_min() -> f64 { 0.00 }
-    fn fill_ratio_max() -> f64 { 1.00 }
+    fn fill_ratio_min() -> f64 { 0.03 }
+    fn fill_ratio_max() -> f64 { 0.5 }
     fn preprocess_close_kernel_size() -> i32 { 3 }
     fn preprocess_open_kernel_size() -> i32 { 1 }
     fn max_end_points() -> usize { 2 }
@@ -141,4 +142,5 @@ impl VxConfig for VxPageConfig {
     fn lab_a_threshold() -> f64 { 160.0 }
     fn component_min_points() -> usize { 4 }
     fn pac_min_points_count() -> usize { 18 }
+    fn vx_box_expand_size() -> i32 { 4 }
 }

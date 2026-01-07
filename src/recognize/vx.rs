@@ -1,6 +1,6 @@
 use crate::{config::{ImageProcessingConfig, VxConfig, VxPageConfig}, models::{ContourInfo, Coordinate, MarkPaper, MobileOutput, ProcessedImage, Quad, RecResult, RecType}, myutils::{image::{crop_image, det_red_lab, get_perspective_transform_matrix_with_points, merge_coordinates, pers_trans_image}, math::match_points, rendering::{RenderMode, render_quad}}, recognize::location::LocationModule};
 use anyhow::{Ok, Result};
-use opencv::{core::{Mat, MatTraitConstManual, Point2f, Point2i, Size, Vector}, imgproc, prelude::MatTraitConst};
+use opencv::{core::{Mat, MatTraitConstManual, Point2f, Point2i, Size, Vector}, imgcodecs::imwrite, imgproc, prelude::MatTraitConst};
 use tract_onnx::prelude::*;
 use ndarray::{Array4, ArrayViewD};
 use std::sync::Arc;
@@ -40,7 +40,7 @@ impl RecVxModule {
                 0,
                 InferenceFact::dt_shape(
                     f32::datum_type(),
-                    tvec![1, 3, 28, 42], // TinyCNN 输入尺寸
+                    tvec![1, 3, 36, 50], // TinyCNN 输入尺寸
                 ),
             )?
             .into_optimized()?
@@ -126,18 +126,19 @@ impl RecVxModule {
 
     fn rec_options(&self, process_image: &ProcessedImage, options: &mut RecResult) -> Result<()> {
         for rec_option in options.rec_options.iter_mut() {
-            // let coor = &rec_option.coordinate;
-            // let sub_image = crop_image(&process_image.rgb, coor)?;
-            
-            // let red_image = det_red_lab(&sub_image)?;
-            // let has_red = self.quick_filter::<VxPageConfig>(&red_image)?;
-            // let mut vx_res = false;
-            // if has_red {
-            //     let (class_id, _confidence) = self.infer_tiny_cnn(&sub_image)?;
-            //     if class_id == 0 { vx_res = true; }
-            // }
-            // rec_option.vx = vx_res;
-            rec_option.vx = true;
+            let mut coor = rec_option.coordinate.clone();
+            coor.x -= VxPageConfig::vx_box_expand_size();
+            coor.y -= VxPageConfig::vx_box_expand_size();
+            coor.w += VxPageConfig::vx_box_expand_size() * 2;
+            coor.h += VxPageConfig::vx_box_expand_size() * 2;
+
+            let sub_image = crop_image(&process_image.rgb, &coor)?;
+        
+            let mut vx_res = false;
+            let (class_id, _confidence) = self.infer_tiny_cnn(&sub_image)?;
+            if class_id == 0 { vx_res = true; }
+            rec_option.vx = vx_res;
+
             // unsafe {
             //     COUNT += 1;
             //     let out_path = format!("dev/test_data/debug/vx_{:?}_{vx_res:?}.jpg", COUNT);
@@ -218,7 +219,7 @@ impl RecVxModule {
     }
 
     /// TinyCNN 预处理：保持宽高比 resize + 居中 padding
-    /// Python: img_height=28, img_width=42, pad_value=1.0 (白色)
+    /// Python: img_height=36, img_width50, pad_value=1.0 (白色)
     pub fn preprocess_for_tiny_cnn(&self, bgr: &Mat) -> Result<Tensor> {
         let h = bgr.rows();
         let w = bgr.cols();
@@ -227,8 +228,8 @@ impl RecVxModule {
         }
 
         // 目标尺寸
-        let img_h = 28;
-        let img_w = 42;
+        let img_h = 36;
+        let img_w =50;
 
         // 计算缩放比例，保持宽高比
         let scale = f32::min(img_w as f32 / w as f32, img_h as f32 / h as f32);
@@ -250,7 +251,7 @@ impl RecVxModule {
         let resized = resized.try_clone()?;
         let data = resized.data_bytes()?; // BGRBGR...
 
-        // 创建 padding 后的 tensor [1, 3, 28, 42]，填充值为1.0（白色）
+        // 创建 padding 后的 tensor [1, 3, 36, 50]，填充值为1.0（白色）
         let mut input = Array4::<f32>::zeros((1, 3, img_h as usize, img_w as usize));
 
         // 计算居中偏移
@@ -533,7 +534,7 @@ impl RecVxModule {
         // 预计算积分图
         let integral = crate::myutils::image::integral_image(closed)?;
 
-        println!("=== Refine Coordinates (search_range={}, border_width={}) ===", search_range, border_width);
+        // println!("=== Refine Coordinates (search_range={}, border_width={}) ===", search_range, border_width);
 
         for (q_idx, rec_result) in mobile_output.rec_results.iter_mut().enumerate() {
             if rec_result.rec_type != RecType::Vx {
@@ -547,12 +548,12 @@ impl RecVxModule {
                     search_range,
                     border_width,
                 )?;
-                println!(
-                    "  Q{}-Opt{}: offset=({:+}, {:+}), score={}, pos=({},{}) -> ({},{})",
-                    q_idx, opt_idx, dx, dy, score,
-                    rec_option.coordinate.x, rec_option.coordinate.y,
-                    refined.x, refined.y
-                );
+                // println!(
+                //     "  Q{}-Opt{}: offset=({:+}, {:+}), score={}, pos=({},{}) -> ({},{})",
+                //     q_idx, opt_idx, dx, dy, score,
+                //     rec_option.coordinate.x, rec_option.coordinate.y,
+                //     refined.x, refined.y
+                // );
                 rec_option.coordinate = refined;
             }
         }
@@ -560,5 +561,25 @@ impl RecVxModule {
         println!("=== Refine Done ===");
         Ok(())
     }
+
+    pub fn create_train_data(&self, image: &Mat, output: &MobileOutput, out_dir: &String, file_name: &String) -> Result<()> { 
+        for rec_result in output.rec_results.iter() { 
+            if rec_result.rec_type != RecType::Vx {
+                continue;
+            }
+            for rec_option in rec_result.rec_options.iter() {
+                let mut coor = rec_option.coordinate.clone();
+                coor.x -= VxPageConfig::vx_box_expand_size();
+                coor.y -= VxPageConfig::vx_box_expand_size();
+                coor.w += 2 * VxPageConfig::vx_box_expand_size();
+                coor.h += 2 * VxPageConfig::vx_box_expand_size();
+                let sub_image = crop_image(image, &coor)?;
+                let out_path = format!("{}/{}_{}_{}.jpg", out_dir, file_name, coor.x, coor.y);
+                imwrite(&out_path, &sub_image, &Vector::<i32>::new())?;
+            }
+        }
+        Ok(())
+    }
+    
 }
 

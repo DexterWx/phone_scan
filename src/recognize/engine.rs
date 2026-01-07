@@ -10,6 +10,10 @@ use crate::recognize::assist_location::AssistLocationModule;
 use crate::recognize::page_number::PageNumberModule;
 use crate::recognize::vx::RecVxModule;
 
+use opencv::{core::Vector, imgcodecs::imwrite};
+use crate::myutils::rendering::{render_quad, RenderMode, render_output, Colors};
+
+
 /// 识别引擎
 pub struct RecEngine {
     /// 定位模块
@@ -75,11 +79,12 @@ impl RecEngine {
         )?;
 
         // 6. 找到辅助定位点
-        let assist_location = self.assist_location_module.infer_single::<AssistLocationSingleConfig>(&baizheng, &mark.assist_location)?;
-        
+        let mut mark_assist_location = mark.assist_location.clone();
+        let assist_location = self.assist_location_module.infer_single::<AssistLocationSingleConfig>(&baizheng, &mut mark_assist_location)?;
+
         // 7. 获取变换矩阵
         let mut src = assist_location.to_points();
-        let mut target = mark.assist_location.to_points();
+        let mut target = mark_assist_location.to_points();
         if src.len() < 4 || target.len() < 4 {
             src.extend(mark.boundary.to_points());
             target.extend(mark.boundary.to_points());
@@ -154,6 +159,120 @@ impl RecEngine {
         
         // 2. 定位检测
         let location = self.location_module.infer(&processed_image)?;
+        #[cfg(debug_assertions)]
+        {
+
+            let mut render_image = processed_image.rgb.clone();
+            let _ = render_quad(
+                &mut render_image, &location, Some(RenderMode::Hollow), None, None
+            )?;
+            let debug_path = format!("dev/test_data/debug/{}.jpg", "z_debug_location");
+            imwrite(&debug_path, &render_image, &Vector::<i32>::new())
+                .context("保存调试图片失败")?;
+        }
+        // 3. 获取变换矩阵
+        let tg_boundary = &mark.boundary;
+        let pers_trans_matrix = get_perspective_transform_matrix_with_boundary(&location.to_points(), &tg_boundary.to_points())?;
+        
+        // 4. 第一次变换
+        pers_trans_image(
+            &mut baizheng, &pers_trans_matrix, tg_boundary.x+tg_boundary.w, tg_boundary.y+tg_boundary.h
+        )?;
+        #[cfg(debug_assertions)]
+        {
+            let debug_path = format!("dev/test_data/debug/{}.jpg", "z_baizheng1_rgb");
+            imwrite(&debug_path, &baizheng.rgb, &Vector::<i32>::new())
+                .context("保存调试图片失败")?; 
+        }
+
+        let page_index = self.page_number_module.infer(&baizheng, &mark.page_number)?;
+        let page_mark = mark.pages.get(page_index-1)
+            .context("未找到对应的页码信息")?;
+
+        #[cfg(debug_assertions)]
+        {
+            let debug_path = format!("dev/test_data/debug/{}.jpg", "z_mor_for_assist");
+            imwrite(&debug_path, &baizheng.closed, &Vector::<i32>::new())
+                .context("保存调试图片失败")?; 
+        }
+        // 5. 找到辅助定位点
+        // 如果缺失，可能会删点
+        // 所以变换阶段使用副本操作
+        let mut page_mark_assist_location = page_mark.assist_location.clone();
+        let assist_location = self.assist_location_module.infer_paper(&baizheng, &mut page_mark_assist_location)?;
+
+        // 6. 获取变换矩阵
+        let mut src = assist_location.to_points();
+        let mut target = page_mark_assist_location.to_points();
+        
+        if src.len() < 8 || target.len() < 8 {
+            src.extend(mark.boundary.to_points());
+            target.extend(mark.boundary.to_points());
+        }
+        let pers_trans_matrix = get_perspective_transform_matrix_with_points(&src, &target)?;
+        
+        // 7. 第二次变换
+        pers_trans_image(
+            &mut baizheng, &pers_trans_matrix, mark.boundary.x+mark.boundary.w, mark.boundary.y+mark.boundary.h
+        )?;
+        #[cfg(debug_assertions)]
+        {
+            let debug_path = format!("dev/test_data/debug/{}.jpg", "z_baizheng2_rgb");
+            imwrite(&debug_path, &baizheng.rgb, &Vector::<i32>::new())
+                .context("保存调试图片失败")?; 
+        }
+
+        // 8. 初始化输出
+        let mut mobile_output = MobileOutput::new(&page_mark.rec_items);
+        mobile_output.page_number = page_index-1;
+        
+        // 9. 填涂识别
+        self.rec_fill_module.infer::<FillPageConfig>(&baizheng, &mut mobile_output)?;
+
+        // 9.5 vx区矫正
+        self.rec_vx_module.refine_image(&mut baizheng, &mut mobile_output, mark)?;
+        self.rec_vx_module.refine_all_coordinates(&baizheng.closed, &mut mobile_output, 8, 2)?;
+
+        // 10. vx识别
+        if mark.num_threads > 1 {
+            println!("多线程 {:?}", mark.num_threads);
+            self.rec_vx_module.infer_parallel(&baizheng, &mut mobile_output)?;
+        } else {
+            println!("单线程 {:?}", mark.num_threads);
+            self.rec_vx_module.infer(&baizheng, &mut mobile_output)?;
+        }
+        // 渲染
+        #[cfg(debug_assertions)] {
+
+            let mut render_image = baizheng.rgb.clone();
+            let _ = render_output(&mut render_image, &mobile_output, &mark.pages[page_index-1].assist_location,Some(RenderMode::Hollow), Some(Colors::orange()), Some(2), Some(1.0));
+
+            let debug_path = format!("dev/test_data/debug/{}.jpg", "z_render_out");
+            imwrite(&debug_path, &render_image, &Vector::<i32>::new())
+                .context("保存调试图片失败")?;
+        }
+        
+        
+        
+        Ok(mobile_output)
+    }
+
+
+    pub fn make_vx_data(&self, image: &Mat, outdir: &String, file_name: &String) -> Result<MobileOutput> { 
+        let mark = self.mark_paper.as_ref().context("引擎未初始化")?;
+        let mark = &mark.resize(ImageProcessingConfig::PAPER_SCAN_TARGET_SCALE);
+        let target_width = if mark.is_a4() {
+            ImageProcessingConfig::TARGET_WIDTH_A4
+        } else {
+            ImageProcessingConfig::TARGET_WIDTH_A3
+        };
+
+        // 1. 处理图片
+        let processed_image = process_image(&image, target_width)?;
+        let mut baizheng = processed_image.clone();
+        
+        // 2. 定位检测
+        let location = self.location_module.infer(&processed_image)?;
 
         // 3. 获取变换矩阵
         let tg_boundary = &mark.boundary;
@@ -169,11 +288,12 @@ impl RecEngine {
             .context("未找到对应的页码信息")?;
 
         // 5. 找到辅助定位点
-        let assist_location = self.assist_location_module.infer_paper(&baizheng, &page_mark.assist_location)?;
-        
+        let mut page_mark_assist_location = page_mark.assist_location.clone();
+        let assist_location = self.assist_location_module.infer_paper(&baizheng, &mut page_mark_assist_location)?;
+
         // 6. 获取变换矩阵
         let mut src = assist_location.to_points();
-        let mut target = page_mark.assist_location.to_points();
+        let mut target = page_mark_assist_location.to_points();
         
         if src.len() < 8 || target.len() < 8 {
             src.extend(mark.boundary.to_points());
@@ -196,42 +316,8 @@ impl RecEngine {
         // 9.5 vx区矫正
         // self.rec_vx_module.refine_image(&mut baizheng, &mut mobile_output, mark)?;
         self.rec_vx_module.refine_all_coordinates(&baizheng.closed, &mut mobile_output, 8, 2)?;
-
-        // 10. vx识别
-        if mark.num_threads > 1 {
-            println!("多线程 {:?}", mark.num_threads);
-            self.rec_vx_module.infer_parallel(&baizheng, &mut mobile_output)?;
-        } else {
-            println!("单线程 {:?}", mark.num_threads);
-            self.rec_vx_module.infer(&baizheng, &mut mobile_output)?;
-        }
-        // 渲染
-        #[cfg(debug_assertions)] {
-            use opencv::{core::Vector, imgcodecs::imwrite};
-            use crate::myutils::rendering::{render_output, render_quad, Colors, RenderMode};
-
-            let mut render_image = processed_image.rgb.clone();
-            let _ = render_quad(
-                &mut render_image, &location, Some(RenderMode::Hollow), None, None
-            )?;
-            let debug_path = format!("dev/test_data/debug/{}.jpg", "z_debug_location");
-            let params = Vector::<i32>::new();
-            imwrite(&debug_path, &render_image, &params)
-                .context("保存调试图片失败")?;
-
-            let rgb_path = format!("dev/test_data/debug/{}.jpg", "z_baizheng_rgb");
-            imwrite(&rgb_path, &baizheng.rgb, &params)
-                .context("保存调试图片失败")?;
-
-            let mut render_out = baizheng.rgb.clone();
-            let _ = render_output(&mut render_out, &mobile_output, &mark.pages[page_index-1].assist_location,Some(RenderMode::Hollow), Some(Colors::orange()), Some(2), Some(1.0));
-
-            let render_out_path = format!("dev/test_data/debug/{}.jpg", "z_render_out");
-            imwrite(&render_out_path, &render_out, &params)
-                .context("保存调试图片失败")?;
-        }
-        
-        
+        let file_name = format!("{}_{}.jpg", page_index-1, file_name);
+        self.rec_vx_module.create_train_data(&baizheng.rgb, &mobile_output, outdir, &file_name)?;
         
         Ok(mobile_output)
     }

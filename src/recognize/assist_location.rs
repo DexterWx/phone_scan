@@ -5,6 +5,7 @@ use crate::models::AssistLocation;
 use crate::models::ProcessedImage;
 use crate::myutils::image::merge_coordinates;
 use crate::myutils::rendering::render_coordinates;
+use crate::recognize::align::{extract_y_centers, find_missing_indices, find_extra_indices, filter_by_extra_indices};
 use anyhow::Ok;
 use anyhow::Result;
 use opencv::core::Mat;
@@ -23,41 +24,161 @@ impl AssistLocationModule {
 
     pub fn infer_single<T: AssistLocationConfig>(
         &self, processed_image: &ProcessedImage,
-        assist_location: &AssistLocation
+        assist_location: &mut AssistLocation
     ) -> Result<AssistLocation> {
         let left_area = merge_coordinates(&assist_location.left, T::assist_area_extend_size_w(), T::assist_area_extend_size_h());
         let right_area = merge_coordinates(&assist_location.right, T::assist_area_extend_size_w(), T::assist_area_extend_size_h());
         let left_src_assist = Self::find_assist_location::<T>(&processed_image.closed, &left_area)?;
         let right_src_assist = Self::find_assist_location::<T>(&processed_image.closed, &right_area)?;
-        // println!("辅助定位点寻找结果，左侧找到{}个，右侧找到{}个", left_src_assist.len(), right_src_assist.len());
-        // let mut rgb = processed_image.rgb.clone();
-        // render_coordinates(&mut rgb, &left_src_assist, Some(crate::myutils::rendering::RenderMode::Hollow), None, None);
-        // render_coordinates(&mut rgb, &right_src_assist, Some(crate::myutils::rendering::RenderMode::Hollow), None, None);
-        // opencv::imgcodecs::imwrite("dev/test_data/debug/assist_location_found.jpg", &rgb, &Vector::<i32>::new()).unwrap();
-        if left_src_assist.len() != right_src_assist.len() {
-            anyhow::bail!("辅助定位点数量不匹配，左侧找到{}个，右侧找到{}个", left_src_assist.len(), right_src_assist.len());
+        #[cfg(debug_assertions)]
+        {
+            println!("辅助定位点寻找结果，左侧找到{}个，右侧找到{}个", left_src_assist.len(), right_src_assist.len());
+            let mut rgb = processed_image.rgb.clone();
+            let _ = render_coordinates(&mut rgb, &left_src_assist, Some(crate::myutils::rendering::RenderMode::Hollow), None, None);
+            let _ = render_coordinates(&mut rgb, &right_src_assist, Some(crate::myutils::rendering::RenderMode::Hollow), None, None);
+            let out_path = format!("dev/test_data/debug/assist_location_found_{:?}.jpg", assist_location.left[0].x);
+            opencv::imgcodecs::imwrite(&out_path, &rgb, &Vector::<i32>::new()).unwrap();
         }
 
-        if left_src_assist.len() != assist_location.left.len() {
-            anyhow::bail!("辅助定位点数量异常: {:?}_{}", left_src_assist.len(), assist_location.left.len(),);
-        }
+        // 允许的最大多检/漏检数量
+        const MAX_DIFF: usize = 2;
 
-        Ok(
-            AssistLocation {
+        let expected_count = assist_location.left.len(); // 左右标注数量应该相同
+        let detected_left_count = left_src_assist.len();
+        let detected_right_count = right_src_assist.len();
+
+        let left_match = detected_left_count == expected_count;
+        let right_match = detected_right_count == expected_count;
+
+        // 如果两列都完全匹配，直接返回
+        if left_match && right_match {
+            return Ok(AssistLocation {
                 left: left_src_assist,
-                right: right_src_assist 
+                right: right_src_assist,
+            });
+        }
+
+        // 必须有一列完全匹配才能进入对齐逻辑
+        if !left_match && !right_match {
+            anyhow::bail!(
+                "左右两列都不匹配，无法对齐。左侧检测{}个/期望{}个，右侧检测{}个/期望{}个",
+                detected_left_count, expected_count,
+                detected_right_count, expected_count
+            );
+        }
+
+        // 检查不匹配的那列差异是否在允许范围内
+        let diff = if !left_match {
+            (detected_left_count as i32 - expected_count as i32).abs() as usize
+        } else {
+            (detected_right_count as i32 - expected_count as i32).abs() as usize
+        };
+
+        if diff > MAX_DIFF {
+            anyhow::bail!(
+                "辅助定位点数量差异过大（最大允许{}），左侧检测{}个/期望{}个，右侧检测{}个/期望{}个",
+                MAX_DIFF,
+                detected_left_count, expected_count,
+                detected_right_count, expected_count
+            );
+        }
+
+        // 对不匹配的列进行处理
+        if left_match {
+            // 左侧是完整列，右侧需要处理
+            let left_y = extract_y_centers(&left_src_assist);
+            let right_y = extract_y_centers(&right_src_assist);
+
+            if detected_right_count < expected_count {
+                // 右侧漏检：找出缺失的标注点索引，从右侧标注中删除
+                let missing_indices = find_missing_indices(&left_y, &right_y);
+                #[cfg(debug_assertions)]
+                {
+                    println!("右侧漏检，缺失索引: {:?}", missing_indices);
+                }
+
+                // 从后往前删除标注数据中的右侧点
+                let mut indices_to_remove = missing_indices.clone();
+                indices_to_remove.sort_by(|a, b| b.cmp(a));
+                for idx in indices_to_remove {
+                    assist_location.right.remove(idx);
+                }
+
+                Ok(AssistLocation {
+                    left: left_src_assist,
+                    right: right_src_assist,
+                })
+            } else {
+                // 右侧多检：找出多余的检测点索引，过滤掉
+                let extra_indices = find_extra_indices(&left_y, &right_y);
+                #[cfg(debug_assertions)]
+                {
+                    println!("右侧多检，多余索引: {:?}", extra_indices);
+                }
+
+                let final_right = filter_by_extra_indices(&right_src_assist, &extra_indices);
+
+                Ok(AssistLocation {
+                    left: left_src_assist,
+                    right: final_right,
+                })
             }
-        )
+        } else {
+            // 右侧是完整列，左侧需要处理
+            let right_y = extract_y_centers(&right_src_assist);
+            let left_y = extract_y_centers(&left_src_assist);
+
+            if detected_left_count < expected_count {
+                // 左侧漏检：找出缺失的标注点索引，从左侧标注中删除
+                let missing_indices = find_missing_indices(&right_y, &left_y);
+                #[cfg(debug_assertions)]
+                {
+                    println!("左侧漏检，缺失索引: {:?}", missing_indices);
+                }
+
+                // 从后往前删除标注数据中的左侧点
+                let mut indices_to_remove = missing_indices.clone();
+                indices_to_remove.sort_by(|a, b| b.cmp(a));
+                for idx in indices_to_remove {
+                    assist_location.left.remove(idx);
+                }
+
+                Ok(AssistLocation {
+                    left: left_src_assist,
+                    right: right_src_assist,
+                })
+            } else {
+                // 左侧多检：找出多余的检测点索引，过滤掉
+                let extra_indices = find_extra_indices(&right_y, &left_y);
+                #[cfg(debug_assertions)]
+                {
+                    println!("左侧多检，多余索引: {:?}", extra_indices);
+                }
+
+                let final_left = filter_by_extra_indices(&left_src_assist, &extra_indices);
+
+                Ok(AssistLocation {
+                    left: final_left,
+                    right: right_src_assist,
+                })
+            }
+        }
     }
 
-    pub fn infer_paper(&self, processed_image: &ProcessedImage, assist_location: &AssistLocation) -> Result<AssistLocation> {
+    pub fn infer_paper(&self, processed_image: &ProcessedImage, assist_location: &mut AssistLocation) -> Result<AssistLocation> {
         let mut assist_locations = Vec::new();
-        let split_locations = assist_location.split();
-        for single_location in split_locations {
-            let real_single_location = self.infer_single::<AssistLocationPageConfig>(processed_image, &single_location)?;
+        let mut split_locations = assist_location.split();
+        for single_location in split_locations.iter_mut() {
+            let real_single_location = self.infer_single::<AssistLocationPageConfig>(processed_image, single_location)?;
             assist_locations.push(real_single_location);
         }
         let res = AssistLocation::merge(&assist_locations);
+
+        // 把修改后的 split_locations 合并回 assist_location
+        let merged_ref = AssistLocation::merge(&split_locations);
+        assist_location.left = merged_ref.left;
+        assist_location.right = merged_ref.right;
+
         Ok(res)
     }
 

@@ -32,7 +32,7 @@ mod tests {
 
     #[test]
     fn test_paper() -> Result<()> {
-        let scan_id = "13588";
+        let scan_id = "13587";
         let scan_path = format!("dev/test_data/cards/{scan_id}/test.json");
         let img_path = format!("dev/test_data/cards/{scan_id}/test.jpg");
         let image = imread(&img_path, opencv::imgcodecs::IMREAD_COLOR)?;
@@ -44,6 +44,24 @@ mod tests {
 
         fs::write(format!("dev/test_data/out/{scan_id}.json"), to_json(&res)?)?;
 
+        Ok(())
+    }
+
+    #[test]
+    fn test_crop() -> Result<()> {
+        let scan_id = "13588";
+        let scan_path = format!("dev/test_data/cards/{scan_id}/test.json");
+        let img_path = format!("dev/test_data/cards/{scan_id}/test.jpg");
+        let image = imread(&img_path, opencv::imgcodecs::IMREAD_COLOR)?;
+
+        let scan_string = fs::read_to_string(scan_path)?;
+
+        let engine = engine::RecEngine::new_paper(&scan_string)?;
+        let res = engine.make_vx_data(
+            &image,
+            &"dev/test_data/mark_test".to_string(),
+            &"A3_wangxu_1".to_string()
+        )?;
         Ok(())
     }
 
@@ -204,4 +222,38 @@ pub mod build {
             }
         }
     }
+
+    #[no_mangle]
+    pub extern "C" fn create_train_data(data_ptr: *const u8, data_len: usize, out_dir: *mut c_char, file_name: *mut c_char) -> *mut c_char {
+        let mut failed_output = MobileOutput {
+            code: 1,
+            message: "failed".to_string(),
+            page_number: 0,
+            rec_results: vec![],
+        };
+
+        unsafe {
+            if ENGINE.is_none() {
+                failed_output.message = "请先初始化引擎".to_string();
+                return CString::new(to_json(&failed_output).unwrap()).unwrap().into_raw();
+            }
+        }
+
+        let image = c_to_mat(data_ptr, data_len);
+        if image.is_err() {
+            failed_output.message = image.err().unwrap().to_string();
+            return CString::new(to_json(&failed_output).unwrap()).unwrap().into_raw();
+        }
+
+        unsafe {
+            let engine = ENGINE.as_ref().unwrap();
+            let success_output = engine.make_vx_data(&image.unwrap(), &c_to_string(out_dir), &c_to_string(file_name));
+            if success_output.is_err() {
+                failed_output.message = success_output.err().unwrap().to_string();
+                return CString::new(to_json(&failed_output).unwrap()).unwrap().into_raw();
+            }
+            return CString::new(to_json(&success_output.unwrap()).unwrap()).unwrap().into_raw();
+        }
+    }
+
 }
