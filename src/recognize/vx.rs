@@ -136,7 +136,9 @@ impl RecVxModule {
         
             let mut vx_res = false;
             let (class_id, _confidence) = self.infer_tiny_cnn(&sub_image)?;
-            if class_id == 0 { vx_res = true; }
+            if class_id == 0 {
+                vx_res = true;
+            }
             rec_option.vx = vx_res;
 
             // unsafe {
@@ -172,7 +174,14 @@ impl RecVxModule {
 
         // 2. 串行裁剪所有子图像
         let sub_images: Vec<_> = tasks.iter()
-            .map(|(_, _, coor)| crop_image(&process_image.rgb, coor))
+            .map(|(_, _, coor)| {
+                let mut coor = coor.clone();
+                coor.x -= VxPageConfig::vx_box_expand_size();
+                coor.y -= VxPageConfig::vx_box_expand_size();
+                coor.w += VxPageConfig::vx_box_expand_size() * 2;
+                coor.h += VxPageConfig::vx_box_expand_size() * 2;
+                crop_image(&process_image.rgb, &coor)
+            })
             .collect::<Result<Vec<_>>>()?;
 
         // 3. 在函数内创建线程池，并行处理
