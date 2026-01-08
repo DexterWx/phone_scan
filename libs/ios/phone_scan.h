@@ -79,3 +79,8 @@ void destroy_engine(void);
  * 释放C字符串内存
  */
 void free_string(char *s);
+
+char *create_train_data(const uint8_t *data_ptr,
+                        uintptr_t data_len,
+                        char *out_dir,
+                        char *file_name);

@@ -6,8 +6,10 @@ pub mod config;
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use opencv::core::MatTraitConst;
     use opencv::imgcodecs::imread;
     use crate::myutils::myjson::to_json;
+    use crate::myutils::image::{calc_laplacian_variance, select_clearest_image_owned, read_images_from_dir};
     use crate::recognize::engine;
     use anyhow::Result;
 
@@ -32,7 +34,7 @@ mod tests {
 
     #[test]
     fn test_paper() -> Result<()> {
-        let scan_id = "13587";
+        let scan_id = "13601";
         let scan_path = format!("dev/test_data/cards/{scan_id}/test.json");
         let img_path = format!("dev/test_data/cards/{scan_id}/test.jpg");
         let image = imread(&img_path, opencv::imgcodecs::IMREAD_COLOR)?;
@@ -77,6 +79,36 @@ mod tests {
         let engine = engine::RecEngine::new_paper(&scan_string)?;
         let (res, conf) = engine.rec_vx_module.infer_tiny_cnn(&image)?;
         println!("识别结果: {} {}", res, conf);
+        Ok(())
+    }
+
+    /// 批量推理测试: 从文件夹选择最清晰图片进行识别
+    #[test]
+    fn test_batch_inference() -> Result<()> {
+        let BATCH_SCAN_ID = "13601";
+        let BATCH_IMG_DIR = "/Users/xu.wang/Downloads/test_batch";
+        let scan_path = format!("dev/test_data/cards/{}/test.json", BATCH_SCAN_ID);
+        let engine = engine::RecEngine::new_paper(&fs::read_to_string(&scan_path)?)?;
+
+        let (images, paths) = read_images_from_dir(BATCH_IMG_DIR)?;
+        if images.is_empty() {
+            println!("警告: 文件夹 {} 中没有找到图片", BATCH_IMG_DIR);
+            return Ok(());
+        }
+
+        println!("找到 {} 张图片", images.len());
+        for (idx, (image, path)) in images.iter().zip(paths.iter()).enumerate() {
+            println!("  [{}] {} - 清晰度: {:.2}", idx, path, calc_laplacian_variance(image)?);
+        }
+
+        let clearest_idx = select_clearest_image_owned(&images)?;
+        println!("\n选择最清晰的图片: [{}] {}", clearest_idx, paths[clearest_idx]);
+
+        let res = engine.inference_paper(&images[clearest_idx])?;
+        let output_path = format!("dev/test_data/out/batch_{}.json", BATCH_SCAN_ID);
+        fs::write(&output_path, to_json(&res)?)?;
+        println!("识别结果已保存到: {}", output_path);
+
         Ok(())
     }
 
@@ -248,6 +280,103 @@ pub mod build {
         unsafe {
             let engine = ENGINE.as_ref().unwrap();
             let success_output = engine.make_vx_data(&image.unwrap(), &c_to_string(out_dir), &c_to_string(file_name));
+            if success_output.is_err() {
+                failed_output.message = success_output.err().unwrap().to_string();
+                return CString::new(to_json(&failed_output).unwrap()).unwrap().into_raw();
+            }
+            return CString::new(to_json(&success_output.unwrap()).unwrap()).unwrap().into_raw();
+        }
+    }
+
+    /// 批量推理接口
+    /// 从多张 NV12 图片中选择最清晰的一张进行识别
+    ///
+    /// 参数:
+    /// - images: 所有图片拼接后的连续内存首地址 (NV12 格式)
+    /// - widths: 宽度数组指针
+    /// - heights: 高度数组指针
+    /// - rotations: 旋转角度数组指针 (0, 90, 180, 270)
+    /// - lens: 每张图片的字节长度数组指针
+    /// - count: 图片数量
+    ///
+    /// 返回: JSON 字符串 (MobileOutput)
+    #[no_mangle]
+    pub extern "C" fn inference_batch(
+        images: *const u8,
+        widths: *const u32,
+        heights: *const u32,
+        rotations: *const u8,
+        lens: *const u32,
+        count: u32,
+    ) -> *mut c_char {
+        use crate::myutils::image::{decode_nv12, select_clearest_image_owned};
+
+        let mut failed_output = MobileOutput {
+            code: 1,
+            message: "failed".to_string(),
+            page_number: 0,
+            rec_results: vec![],
+        };
+
+        // 检查引擎是否初始化
+        unsafe {
+            if ENGINE.is_none() {
+                failed_output.message = "请先初始化引擎".to_string();
+                return CString::new(to_json(&failed_output).unwrap()).unwrap().into_raw();
+            }
+        }
+
+        // 检查图片数量
+        if count == 0 {
+            failed_output.message = "图片数量为 0".to_string();
+            return CString::new(to_json(&failed_output).unwrap()).unwrap().into_raw();
+        }
+
+        // 将指针转换为切片
+        let widths_slice = unsafe { std::slice::from_raw_parts(widths, count as usize) };
+        let heights_slice = unsafe { std::slice::from_raw_parts(heights, count as usize) };
+        let rotations_slice = unsafe { std::slice::from_raw_parts(rotations, count as usize) };
+        let lens_slice = unsafe { std::slice::from_raw_parts(lens, count as usize) };
+
+        // 解码所有图片
+        let mut decoded_images = Vec::with_capacity(count as usize);
+        let mut offset: usize = 0;
+
+        for i in 0..count as usize {
+            let width = widths_slice[i] as i32;
+            let height = heights_slice[i] as i32;
+            let rotation = rotations_slice[i] as i32;
+            let len = lens_slice[i] as usize;
+
+            // 获取当前图片的数据切片
+            let image_data = unsafe { std::slice::from_raw_parts(images.add(offset), len) };
+            offset += len;
+
+            // 解码 NV12
+            match decode_nv12(image_data, width, height, rotation) {
+                Ok(mat) => decoded_images.push(mat),
+                Err(e) => {
+                    failed_output.message = format!("解码第 {} 张图片失败: {}", i + 1, e);
+                    return CString::new(to_json(&failed_output).unwrap()).unwrap().into_raw();
+                }
+            }
+        }
+
+        // 选择最清晰的图片
+        let clearest_idx = match select_clearest_image_owned(&decoded_images) {
+            Ok(idx) => idx,
+            Err(e) => {
+                failed_output.message = format!("选择最清晰图片失败: {}", e);
+                return CString::new(to_json(&failed_output).unwrap()).unwrap().into_raw();
+            }
+        };
+
+        // 使用最清晰的图片进行识别
+        let clearest_image = &decoded_images[clearest_idx];
+
+        unsafe {
+            let engine = ENGINE.as_ref().unwrap();
+            let success_output = engine.inference_paper(clearest_image);
             if success_output.is_err() {
                 failed_output.message = success_output.err().unwrap().to_string();
                 return CString::new(to_json(&failed_output).unwrap()).unwrap().into_raw();

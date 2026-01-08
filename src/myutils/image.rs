@@ -1,10 +1,181 @@
 use opencv::{
-    calib3d, core::{AlgorithmHint, BORDER_CONSTANT, CV_32S, Mat, Point2f, Point2i, Scalar, Size, Vector, bitwise_or, in_range, no_array}, imgcodecs::{IMREAD_COLOR, imdecode, imread}, imgproc, prelude::*
+    calib3d, core::{AlgorithmHint, BORDER_CONSTANT, CV_8UC1, CV_32S, CV_64F, Mat, Point2f, Point2i, Scalar, Size, Vector, bitwise_or, in_range, no_array, ROTATE_90_CLOCKWISE, ROTATE_180, ROTATE_90_COUNTERCLOCKWISE, MatTraitConst}, imgcodecs::{IMREAD_COLOR, imdecode, imread}, imgproc, prelude::*
 };
 use base64::{Engine as _, engine::general_purpose};
-use anyhow::{Result, Context};
+use anyhow::{Result, Context, anyhow};
 use crate::{config::{VxConfig, VxPageConfig}, models::{ConnectFeatures, Coordinate, ProcessedImage}};
 use crate::config::ImageProcessingConfig;
+
+/// 解码 NV12 数据为 BGR Mat
+/// - nv12_data: NV12 原始数据
+/// - width: 图像宽度
+/// - height: 图像高度
+/// - rotation: 旋转角度 (0, 90, 180, 270)
+pub fn decode_nv12(nv12_data: &[u8], width: i32, height: i32, rotation: i32) -> Result<Mat> {
+    // 验证数据长度
+    let expected_size = (width * height * 3 / 2) as usize;
+    if nv12_data.len() != expected_size {
+        return Err(anyhow!(
+            "NV12 数据长度不匹配: 期望 {} 字节, 实际 {} 字节",
+            expected_size,
+            nv12_data.len()
+        ));
+    }
+
+    // 创建 NV12 Mat (Y + UV 平面)
+    let nv12_height = height * 3 / 2;
+    let nv12_mat = unsafe {
+        Mat::new_rows_cols_with_data_unsafe(
+            nv12_height,
+            width,
+            CV_8UC1,
+            nv12_data.as_ptr() as *mut std::ffi::c_void,
+            width as usize,
+        ).context("创建 NV12 Mat 失败")?
+    };
+
+    // 转换 NV12 到 BGR
+    let mut bgr_mat = Mat::default();
+    imgproc::cvt_color(
+        &nv12_mat,
+        &mut bgr_mat,
+        imgproc::COLOR_YUV2BGR_NV12,
+        0,
+        AlgorithmHint::ALGO_HINT_DEFAULT,
+    ).context("NV12 转 BGR 失败")?;
+
+    // 根据旋转角度旋转图像
+    if rotation == 0 {
+        Ok(bgr_mat)
+    } else {
+        let mut rotated = Mat::default();
+        let rotate_code = match rotation {
+            90 => ROTATE_90_CLOCKWISE,
+            180 => ROTATE_180,
+            270 => ROTATE_90_COUNTERCLOCKWISE,
+            _ => return Err(anyhow!("不支持的旋转角度: {}", rotation)),
+        };
+        opencv::core::rotate(&bgr_mat, &mut rotated, rotate_code)
+            .context("旋转图像失败")?;
+        Ok(rotated)
+    }
+}
+
+/// 计算图像的拉普拉斯方差（清晰度评分）
+/// 返回值越大，图像越清晰
+pub fn calc_laplacian_variance(image: &Mat) -> Result<f64> {
+    // 转灰度图
+    let mut gray = Mat::default();
+    if image.channels() == 3 {
+        imgproc::cvt_color(
+            image,
+            &mut gray,
+            imgproc::COLOR_BGR2GRAY,
+            0,
+            AlgorithmHint::ALGO_HINT_DEFAULT,
+        ).context("转灰度图失败")?;
+    } else {
+        gray = image.clone();
+    }
+
+    // 计算拉普拉斯算子
+    let mut laplacian = Mat::default();
+    imgproc::laplacian(
+        &gray,
+        &mut laplacian,
+        CV_64F,
+        3,  // ksize
+        1.0,  // scale
+        0.0,  // delta
+        opencv::core::BORDER_DEFAULT,
+    ).context("计算拉普拉斯失败")?;
+
+    // 计算方差
+    let mut mean = Mat::default();
+    let mut stddev = Mat::default();
+    opencv::core::mean_std_dev(&laplacian, &mut mean, &mut stddev, &no_array())
+        .context("计算方差失败")?;
+
+    let variance = *stddev.at::<f64>(0)? * *stddev.at::<f64>(0)?;
+    Ok(variance)
+}
+
+/// 从 Mat 引用数组中选择最清晰的图片
+/// 返回最清晰图片的索引
+pub fn select_clearest_image(images: &[&Mat]) -> Result<usize> {
+    if images.is_empty() {
+        anyhow::bail!("图片数组为空");
+    }
+
+    let mut max_variance = f64::MIN;
+    let mut clearest_idx = 0;
+
+    for (idx, image) in images.iter().enumerate() {
+        let variance = calc_laplacian_variance(image)?;
+        if variance > max_variance {
+            max_variance = variance;
+            clearest_idx = idx;
+        }
+    }
+
+    Ok(clearest_idx)
+}
+
+/// 从 Mat 数组中选择最清晰的图片（所有权版本）
+/// 返回最清晰图片的索引
+pub fn select_clearest_image_owned(images: &[Mat]) -> Result<usize> {
+    if images.is_empty() {
+        anyhow::bail!("图片数组为空");
+    }
+
+    let mut max_variance = f64::MIN;
+    let mut clearest_idx = 0;
+
+    for (idx, image) in images.iter().enumerate() {
+        let variance = calc_laplacian_variance(image)?;
+        if variance > max_variance {
+            max_variance = variance;
+            clearest_idx = idx;
+        }
+    }
+
+    Ok(clearest_idx)
+}
+
+/// 从文件夹读取所有图片
+/// 支持 jpg, jpeg, png 格式
+/// 返回 (图片数组, 文件路径数组)
+pub fn read_images_from_dir(dir_path: &str) -> Result<(Vec<Mat>, Vec<String>)> {
+    use std::fs;
+    use std::path::Path;
+
+    let dir = Path::new(dir_path);
+    if !dir.exists() {
+        anyhow::bail!("文件夹不存在: {}", dir_path);
+    }
+
+    let mut images = Vec::new();
+    let mut paths = Vec::new();
+
+    let entries = fs::read_dir(dir).context("读取文件夹失败")?;
+    for entry in entries {
+        let entry = entry?;
+        let path = entry.path();
+
+        if let Some(ext) = path.extension() {
+            let ext_lower = ext.to_string_lossy().to_lowercase();
+            if ext_lower == "jpg" || ext_lower == "jpeg" || ext_lower == "png" {
+                let image = imread(&path.to_string_lossy(), IMREAD_COLOR)?;
+                if !image.empty() {
+                    paths.push(path.to_string_lossy().to_string());
+                    images.push(image);
+                }
+            }
+        }
+    }
+
+    Ok((images, paths))
+}
 
 pub fn read_image(input: &String) -> Result<Mat> {
     // 判断输入是文件路径还是base64字符串
