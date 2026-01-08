@@ -135,11 +135,12 @@ impl RecVxModule {
             let sub_image = crop_image(&process_image.rgb, &coor)?;
         
             let mut vx_res = false;
-            let (class_id, _confidence) = self.infer_tiny_cnn(&sub_image)?;
+            let (class_id, confidence) = self.infer_tiny_cnn(&sub_image)?;
             if class_id == 0 {
                 vx_res = true;
             }
             rec_option.vx = vx_res;
+            rec_option.fill_rate = confidence; // 存储置信度
 
             // unsafe {
             //     COUNT += 1;
@@ -187,20 +188,21 @@ impl RecVxModule {
         // 3. 在函数内创建线程池，并行处理
         let pool = self.pool.as_ref().unwrap();
 
-        let results: Vec<bool> = pool.install(|| {
+        let results: Vec<(bool, f64)> = pool.install(|| {
             sub_images
                 .par_iter()
             .map(|sub_image| {
-                    let (class_id, _confidence) = self.infer_tiny_cnn(sub_image).ok()?;
-                    Some(class_id == 0)
+                    let (class_id, confidence) = self.infer_tiny_cnn(sub_image).ok()?;
+                    Some((class_id == 0, confidence))
                 })
-                .map(|opt| opt.unwrap_or(false))
+                .map(|opt| opt.unwrap_or((false, 0.0)))
                 .collect()
         });
 
         // 4. 回写结果
-        for ((rec_idx, opt_idx, _), vx_res) in tasks.iter().zip(results) {
+        for ((rec_idx, opt_idx, _), (vx_res, confidence)) in tasks.iter().zip(results) {
             mobile_output.rec_results[*rec_idx].rec_options[*opt_idx].vx = vx_res;
+            mobile_output.rec_results[*rec_idx].rec_options[*opt_idx].fill_rate = confidence;
         }
 
         // 5. 设置最终结果
@@ -344,12 +346,37 @@ impl RecVxModule {
             if rec_result.rec_type != RecType::Vx {
                 continue;
             }
-            for (index, rec_option) in rec_result.rec_options.iter_mut().enumerate() {
-                if rec_option.vx {
-                    rec_result.rec_result[index] = true;
-                } else {
-                    rec_result.rec_result[index] = false;
+
+            // 找出所有 vx=true 的选项
+            let true_indices: Vec<usize> = rec_result.rec_options.iter()
+                .enumerate()
+                .filter(|(_, opt)| opt.vx)
+                .map(|(idx, _)| idx)
+                .collect();
+
+            // 如果有多个 vx=true，只保留置信度最高的
+            if true_indices.len() > 1 {
+                // 找到置信度最高的索引
+                let best_idx = true_indices.iter()
+                    .max_by(|&&a, &&b| {
+                        rec_result.rec_options[a].fill_rate
+                            .partial_cmp(&rec_result.rec_options[b].fill_rate)
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                    })
+                    .copied()
+                    .unwrap();
+
+                // 将其他的置为 false
+                for &idx in &true_indices {
+                    if idx != best_idx {
+                        rec_result.rec_options[idx].vx = false;
+                    }
                 }
+            }
+
+            // 设置 rec_result
+            for (index, rec_option) in rec_result.rec_options.iter().enumerate() {
+                rec_result.rec_result[index] = rec_option.vx;
             }
         }
         Ok(())

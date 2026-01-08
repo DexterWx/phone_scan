@@ -230,7 +230,7 @@ impl RecEngine {
         self.rec_fill_module.infer::<FillPageConfig>(&baizheng, &mut mobile_output)?;
 
         // 9.5 vx区矫正
-        self.rec_vx_module.refine_image(&mut baizheng, &mut mobile_output, mark)?;
+        // self.rec_vx_module.refine_image(&mut baizheng, &mut mobile_output, mark)?;
         self.rec_vx_module.refine_all_coordinates(&baizheng.closed, &mut mobile_output, 8, 2)?;
 
         // 10. vx识别

@@ -84,3 +84,24 @@ char *create_train_data(const uint8_t *data_ptr,
                         uintptr_t data_len,
                         char *out_dir,
                         char *file_name);
+
+/**
+ * 批量推理接口
+ * 从多张 NV12 图片中选择最清晰的一张进行识别
+ *
+ * 参数:
+ * - images: 所有图片拼接后的连续内存首地址 (NV12 格式)
+ * - widths: 宽度数组指针
+ * - heights: 高度数组指针
+ * - rotations: 旋转角度数组指针 (0, 90, 180, 270)
+ * - lens: 每张图片的字节长度数组指针
+ * - count: 图片数量
+ *
+ * 返回: JSON 字符串 (MobileOutput)
+ */
+char *inference_batch(const uint8_t *images,
+                      const uint32_t *widths,
+                      const uint32_t *heights,
+                      const uint8_t *rotations,
+                      const uint32_t *lens,
+                      uint32_t count);
