@@ -161,7 +161,7 @@ class MarkDataProcessor:
                     # 个位数一组
                     one_part = []
                     for option in sub_options:
-                        if option['value'] in ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]:
+                        if option['value'] in ["0", "1.5", "1", "2","2.5", "3", "3.5","4","4.5", "5", "6", "7", "8", "9"]:
                             one_part.append(option)
                     # 小数一组
                     decimal_part = []

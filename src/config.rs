@@ -144,3 +144,12 @@ impl VxConfig for VxPageConfig {
     fn pac_min_points_count() -> usize { 18 }
     fn vx_box_expand_size() -> i32 { 4 }
 }
+
+/// 初始化全局 rayon 线程池
+/// 应在库初始化时调用一次，后续调用会被忽略
+pub fn init_global_thread_pool(num_threads: usize) {
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(num_threads)
+        .build_global()
+        .ok(); // 只能设置一次，后续调用无效但不报错
+}

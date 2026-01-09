@@ -1,4 +1,4 @@
-use crate::{config::{ImageProcessingConfig, VxConfig, VxPageConfig}, models::{ContourInfo, Coordinate, MarkPaper, MobileOutput, ProcessedImage, Quad, RecResult, RecType}, myutils::{image::{crop_image, det_red_lab, get_perspective_transform_matrix_with_points, merge_coordinates, pers_trans_image}, math::match_points, rendering::{RenderMode, render_quad}}, recognize::location::LocationModule};
+use crate::{config::{ImageProcessingConfig, VxConfig, VxPageConfig}, models::{ContourInfo, Coordinate, MarkPaper, MobileOutput, ProcessedImage, Quad, RecResult, RecType}, myutils::{image::{crop_image, get_perspective_transform_matrix_with_points, merge_coordinates, pers_trans_image}, math::match_points}, recognize::location::LocationModule};
 use anyhow::{Ok, Result};
 use opencv::{core::{Mat, MatTraitConstManual, Point2f, Point2i, Size, Vector}, imgcodecs::imwrite, imgproc, prelude::MatTraitConst};
 use tract_onnx::prelude::*;
@@ -10,26 +10,20 @@ static mut COUNT: i32 = 0;
 
 pub struct RecVxModule {
     onnx_model: Option<Arc<TypedRunnableModel<Graph<TypedFact, Box<dyn TypedOp>>>>>,
-    pool: Option<rayon::ThreadPool>,
 }
 
 impl RecVxModule {
-    pub fn new_paper(model_path: &String, num_threads: usize) -> Result<Self> {
+    pub fn new_paper(model_path: &String) -> Result<Self> {
         let onnx_model = Self::load_model(model_path)?;
-        let pool = rayon::ThreadPoolBuilder::new()
-            .num_threads(num_threads)
-            .build()?;
 
         Ok(Self {
             onnx_model: Some(Arc::new(onnx_model)),
-            pool: Some(pool),
         })
     }
 
     pub fn new_single() -> Result<Self> {
         Ok(Self {
             onnx_model: None,
-            pool: None,
         })
     }
 
@@ -125,6 +119,7 @@ impl RecVxModule {
     }
 
     fn rec_options(&self, process_image: &ProcessedImage, options: &mut RecResult) -> Result<()> {
+
         for rec_option in options.rec_options.iter_mut() {
             let mut coor = rec_option.coordinate.clone();
             coor.x -= VxPageConfig::vx_box_expand_size();
@@ -133,7 +128,17 @@ impl RecVxModule {
             coor.h += VxPageConfig::vx_box_expand_size() * 2;
 
             let sub_image = crop_image(&process_image.rgb, &coor)?;
-        
+
+            // Debug: 保存扩展后的 sub_image
+            #[cfg(debug_assertions)]
+            {
+                unsafe {
+                    COUNT += 1;
+                    let out_path = format!("dev/test_data/debug/sub_images/sub_{:?}.jpg", COUNT);
+                    imwrite(&out_path, &sub_image, &Vector::<i32>::new())?;
+                }
+            }
+
             let mut vx_res = false;
             let (class_id, confidence) = self.infer_tiny_cnn(&sub_image)?;
             if class_id == 0 {
@@ -141,16 +146,6 @@ impl RecVxModule {
             }
             rec_option.vx = vx_res;
             rec_option.fill_rate = confidence; // 存储置信度
-
-            // unsafe {
-            //     COUNT += 1;
-            //     let out_path = format!("dev/test_data/debug/vx_{:?}_{vx_res:?}.jpg", COUNT);
-            //     opencv::imgcodecs::imwrite(&out_path, &sub_image, &Default::default())?;
-            //     if has_red {
-            //         let out_path = format!("dev/test_data/debug/vx_{:?}_red.jpg", COUNT);
-            //         opencv::imgcodecs::imwrite(&out_path, &red_image, &Default::default())?;
-            //     }
-            // }
         }
         Ok(())
     }
@@ -185,19 +180,15 @@ impl RecVxModule {
             })
             .collect::<Result<Vec<_>>>()?;
 
-        // 3. 在函数内创建线程池，并行处理
-        let pool = self.pool.as_ref().unwrap();
-
-        let results: Vec<(bool, f64)> = pool.install(|| {
-            sub_images
-                .par_iter()
+        // 3. 并行推理（使用全局线程池）
+        let results: Vec<(bool, f64)> = sub_images
+            .par_iter()
             .map(|sub_image| {
-                    let (class_id, confidence) = self.infer_tiny_cnn(sub_image).ok()?;
-                    Some((class_id == 0, confidence))
-                })
-                .map(|opt| opt.unwrap_or((false, 0.0)))
-                .collect()
-        });
+                let (class_id, confidence) = self.infer_tiny_cnn(sub_image).ok()?;
+                Some((class_id == 0, confidence))
+            })
+            .map(|opt| opt.unwrap_or((false, 0.0)))
+            .collect();
 
         // 4. 回写结果
         for ((rec_idx, opt_idx, _), (vx_res, confidence)) in tasks.iter().zip(results) {
@@ -354,21 +345,16 @@ impl RecVxModule {
                 .map(|(idx, _)| idx)
                 .collect();
 
-            // 如果有多个 vx=true，只保留置信度最高的
+            // 如果有多个 vx=true，只保留置信度等于最大值的
             if true_indices.len() > 1 {
-                // 找到置信度最高的索引
-                let best_idx = true_indices.iter()
-                    .max_by(|&&a, &&b| {
-                        rec_result.rec_options[a].fill_rate
-                            .partial_cmp(&rec_result.rec_options[b].fill_rate)
-                            .unwrap_or(std::cmp::Ordering::Equal)
-                    })
-                    .copied()
-                    .unwrap();
+                // 找到最大置信度
+                let max_confidence = true_indices.iter()
+                    .map(|&idx| rec_result.rec_options[idx].fill_rate)
+                    .fold(f64::NEG_INFINITY, f64::max);
 
-                // 将其他的置为 false
+                // 将置信度小于最大值的置为 false
                 for &idx in &true_indices {
-                    if idx != best_idx {
+                    if rec_result.rec_options[idx].fill_rate < max_confidence {
                         rec_result.rec_options[idx].vx = false;
                     }
                 }
@@ -593,8 +579,6 @@ impl RecVxModule {
                 rec_option.coordinate = refined;
             }
         }
-
-        println!("=== Refine Done ===");
         Ok(())
     }
 

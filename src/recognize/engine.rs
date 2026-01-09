@@ -1,6 +1,6 @@
 use anyhow::{Context, Ok, Result};
 use opencv::core::Mat;
-use crate::config::{AssistLocationSingleConfig, FillPageConfig, FillSingleConfig, ImageProcessingConfig};
+use crate::config::{AssistLocationSingleConfig, FillPageConfig, FillSingleConfig, ImageProcessingConfig, init_global_thread_pool};
 use crate::models::{MarkPaper, MarkSingle, MobileOutput};
 use crate::myutils::image::{get_perspective_transform_matrix_with_boundary, get_perspective_transform_matrix_with_points, pers_trans_image, process_image};
 use crate::myutils::myjson::from_json;
@@ -28,7 +28,7 @@ pub struct RecEngine {
     page_number_module: PageNumberModule,
     /// 初始化mark信息
     mark_single: Option<MarkSingle>,
-    mark_paper: Option<MarkPaper>
+    pub mark_paper: Option<MarkPaper>
 }
 
 impl RecEngine {
@@ -46,12 +46,13 @@ impl RecEngine {
 
     pub fn new_paper(mobile_input: &String) -> Result<Self> {
         let mut mark_paper: MarkPaper = from_json(mobile_input)?;
+        init_global_thread_pool(mark_paper.num_threads);
         mark_paper.init_sort();
         Ok(Self {
             location_module: LocationModule::new(),
             assist_location_module: AssistLocationModule::new(),
             rec_fill_module: RecFillModule::new(),
-            rec_vx_module: RecVxModule::new_paper(&mark_paper.vx_model_path, mark_paper.num_threads)?,
+            rec_vx_module: RecVxModule::new_paper(&mark_paper.vx_model_path)?,
             page_number_module: PageNumberModule::new(),
             mark_paper: Some(mark_paper),
             mark_single: None
@@ -137,9 +138,7 @@ impl RecEngine {
             let render_out_path = format!("dev/test_data/debug/{}.jpg", "render_out");
             imwrite(&render_out_path, &render_out, &params)
                 .context("保存调试图片失败")?;
-            
         }
-
 
         Ok(mobile_output)
     }
@@ -156,9 +155,11 @@ impl RecEngine {
         // 1. 处理图片
         let processed_image = process_image(&image, target_width)?;
         let mut baizheng = processed_image.clone();
-        
+
+
         // 2. 定位检测
         let location = self.location_module.infer(&processed_image)?;
+
         #[cfg(debug_assertions)]
         {
 
@@ -173,11 +174,13 @@ impl RecEngine {
         // 3. 获取变换矩阵
         let tg_boundary = &mark.boundary;
         let pers_trans_matrix = get_perspective_transform_matrix_with_boundary(&location.to_points(), &tg_boundary.to_points())?;
+
         
         // 4. 第一次变换
         pers_trans_image(
             &mut baizheng, &pers_trans_matrix, tg_boundary.x+tg_boundary.w, tg_boundary.y+tg_boundary.h
         )?;
+
         #[cfg(debug_assertions)]
         {
             let debug_path = format!("dev/test_data/debug/{}.jpg", "z_baizheng1_rgb");
@@ -185,6 +188,7 @@ impl RecEngine {
                 .context("保存调试图片失败")?; 
         }
 
+        // 5. 页码识别
         let page_index = self.page_number_module.infer(&baizheng, &mark.page_number)?;
         let page_mark = mark.pages.get(page_index-1)
             .context("未找到对应的页码信息")?;
@@ -195,13 +199,13 @@ impl RecEngine {
             imwrite(&debug_path, &baizheng.closed, &Vector::<i32>::new())
                 .context("保存调试图片失败")?; 
         }
-        // 5. 找到辅助定位点
+        // 6. 找到辅助定位点
         // 如果缺失，可能会删点
         // 所以变换阶段使用副本操作
         let mut page_mark_assist_location = page_mark.assist_location.clone();
         let assist_location = self.assist_location_module.infer_paper(&baizheng, &mut page_mark_assist_location)?;
-
-        // 6. 获取变换矩阵
+        
+        // 7. 获取变换矩阵
         let mut src = assist_location.to_points();
         let mut target = page_mark_assist_location.to_points();
         
@@ -211,7 +215,7 @@ impl RecEngine {
         }
         let pers_trans_matrix = get_perspective_transform_matrix_with_points(&src, &target)?;
         
-        // 7. 第二次变换
+        // 8. 第二次变换
         pers_trans_image(
             &mut baizheng, &pers_trans_matrix, mark.boundary.x+mark.boundary.w, mark.boundary.y+mark.boundary.h
         )?;
@@ -222,18 +226,17 @@ impl RecEngine {
                 .context("保存调试图片失败")?; 
         }
 
-        // 8. 初始化输出
+        // 9. 初始化输出
         let mut mobile_output = MobileOutput::new(&page_mark.rec_items);
         mobile_output.page_number = page_index-1;
         
-        // 9. 填涂识别
+        // 10. 填涂识别
         self.rec_fill_module.infer::<FillPageConfig>(&baizheng, &mut mobile_output)?;
+        
+        // 10.5 vx区矫正
+        self.rec_vx_module.refine_all_coordinates(&baizheng.closed, &mut mobile_output, 10, 2)?;
 
-        // 9.5 vx区矫正
-        // self.rec_vx_module.refine_image(&mut baizheng, &mut mobile_output, mark)?;
-        self.rec_vx_module.refine_all_coordinates(&baizheng.closed, &mut mobile_output, 8, 2)?;
-
-        // 10. vx识别
+        // 11. vx识别
         if mark.num_threads > 1 {
             println!("多线程 {:?}", mark.num_threads);
             self.rec_vx_module.infer_parallel(&baizheng, &mut mobile_output)?;
@@ -241,6 +244,7 @@ impl RecEngine {
             println!("单线程 {:?}", mark.num_threads);
             self.rec_vx_module.infer(&baizheng, &mut mobile_output)?;
         }
+        
         // 渲染
         #[cfg(debug_assertions)] {
 
@@ -251,8 +255,6 @@ impl RecEngine {
             imwrite(&debug_path, &render_image, &Vector::<i32>::new())
                 .context("保存调试图片失败")?;
         }
-        
-        
         
         Ok(mobile_output)
     }

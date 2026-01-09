@@ -210,9 +210,9 @@ pub fn render_output(
                 render_coordinate(image, &scaled_coord, Some(mode), Some(color), Some(thickness))?;
             }
 
-            if rec_result.rec_type == crate::models::RecType::Vx {
-                continue; // 只在填涂识别结果上渲染填涂率
-            }
+            // if rec_result.rec_type == crate::models::RecType::Vx {
+            //     continue; // 只在填涂识别结果上渲染填涂率
+            // }
             
             // 在选项上方渲染填涂率数字（保留两位小数）
             let text_x = (fill_item.coordinate.x as f64 * scale) as i32;
