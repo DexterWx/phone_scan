@@ -6,6 +6,7 @@ pub mod config;
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use opencv::core::MatTraitConst;
     use opencv::imgcodecs::imread;
     use crate::myutils::myjson::to_json;
     use crate::myutils::image::{calc_laplacian_variance, select_clearest_image_owned, read_images_from_dir};
@@ -81,11 +82,15 @@ mod tests {
         Ok(())
     }
 
-    /// 批量推理测试: 从文件夹选择最清晰图片进行识别
+    /// 批量推理测试: 模拟 inference_batch 接口的完整流程
+    /// 读取图片 -> 转 NV12 -> 解码并选择最清晰 -> 识别
     #[test]
     fn test_batch_inference() -> Result<()> {
-        let BATCH_SCAN_ID = "262040";
-        let BATCH_IMG_DIR = "/Users/xu.wang/Downloads/badcase2";
+        use crate::myutils::image::{encode_nv12, decode_nv12_batch_and_select_clearest};
+
+        let BATCH_SCAN_ID = "13601";
+        let BATCH_IMG_DIR = "/Users/xu.wang/Downloads/码点异常";
+        let ROTATION: u8 = 90; // 测试旋转角度
         let scan_path = format!("dev/test_data/cards/{}/test.json", BATCH_SCAN_ID);
         let engine = engine::RecEngine::new_paper(&fs::read_to_string(&scan_path)?)?;
 
@@ -95,15 +100,42 @@ mod tests {
             return Ok(());
         }
 
-        println!("找到 {} 张图片", images.len());
+        println!("找到 {} 张图片，转换为 NV12 格式...", images.len());
+
+        // 1. 将所有图片转成 NV12 格式，模拟移动端数据
+        let mut all_nv12_data: Vec<u8> = Vec::new();
+        let mut widths: Vec<u32> = Vec::new();
+        let mut heights: Vec<u32> = Vec::new();
+        let mut rotations: Vec<u8> = Vec::new();
+        let mut lens: Vec<u32> = Vec::new();
+
         for (idx, (image, path)) in images.iter().zip(paths.iter()).enumerate() {
-            println!("  [{}] {} - 清晰度: {:.2}", idx, path, calc_laplacian_variance(image)?);
+            let (nv12_data, width, height) = encode_nv12(image)?;
+            println!("  [{}] {} - {}x{}, NV12 size: {} bytes",
+                idx, path, width, height, nv12_data.len());
+
+            lens.push(nv12_data.len() as u32);
+            widths.push(width as u32);
+            heights.push(height as u32);
+            rotations.push(ROTATION);
+            all_nv12_data.extend(nv12_data);
         }
 
-        let clearest_idx = select_clearest_image_owned(&images)?;
-        println!("\n选择最清晰的图片: [{}] {}", clearest_idx, paths[clearest_idx]);
+        println!("\n总 NV12 数据: {} bytes", all_nv12_data.len());
 
-        let res = engine.inference_paper(&images[clearest_idx])?;
+        // 2. 使用 decode_nv12_batch_and_select_clearest 解码并选择最清晰
+        let clearest_image = decode_nv12_batch_and_select_clearest(
+            &all_nv12_data,
+            &widths,
+            &heights,
+            &rotations,
+            &lens,
+        )?;
+
+        println!("选择最清晰的图片: {}x{}", clearest_image.cols(), clearest_image.rows());
+
+        // 3. 进行识别
+        let res = engine.inference_paper(&clearest_image)?;
         let output_path = format!("dev/test_data/out/batch_{}.json", BATCH_SCAN_ID);
         fs::write(&output_path, to_json(&res)?)?;
         println!("识别结果已保存到: {}", output_path);

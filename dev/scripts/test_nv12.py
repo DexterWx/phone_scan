@@ -1,13 +1,18 @@
 #!/usr/bin/env python3
 """
-NV12 批量推理测试脚本
-从文件夹读取图片，转换为 NV12 格式，调用 inference_batch 进行识别
+NV12/NV21 批量推理测试脚本
+从文件夹读取图片（支持 jpg/png 或原始 nv12/nv21 文件），调用 inference_batch 进行识别
+
+原始 YUV 文件宽高:
+  1. 优先使用下方配置的 YUV_WIDTH/YUV_HEIGHT
+  2. 如果未配置，则从文件名解析: name_WIDTHxHEIGHT.nv12 或 name_WIDTHxHEIGHT.nv21
 """
 
 import ctypes
 import os
 import sys
 import json
+import re
 from pathlib import Path
 
 # 抑制 macOS objc 重复类警告（cv2 与 rust opencv 冲突）
@@ -21,9 +26,13 @@ os.close(_stderr_fd)
 os.close(_devnull)
 
 # ============== 参数配置区 ==============
-IMG_DIR = "/Users/xu.wang/Downloads/test_batch"      # 图片文件夹路径
+IMG_DIR = "/Users/xu.wang/Downloads/Batch_20260110_121610_787"      # 图片文件夹路径
 MARK_JSON = "dev/test_data/cards/13601/test.json"  # 模板 JSON 路径
-ROTATION = 0                               # 旋转角度: 0, 90, 180, 270
+ROTATION = 180                            # 旋转角度: 0, 90, 180, 270
+
+# NV12/NV21 原始文件的宽高配置（如果文件名中没有宽高信息则使用此配置）
+YUV_WIDTH = 2560                        # YUV 图像宽度
+YUV_HEIGHT = 1440                       # YUV 图像高度
 # ========================================
 
 
@@ -110,8 +119,76 @@ def bgr_to_nv12(bgr_image):
     return nv12_data.tobytes(), width, height
 
 
+def nv21_to_nv12(nv21_data, width, height):
+    """将 NV21 数据转换为 NV12 格式（交换 UV 顺序）"""
+    # NV21: Y + VU (V 在前，U 在后)
+    # NV12: Y + UV (U 在前，V 在后)
+    y_size = width * height
+
+    nv12_data = bytearray(nv21_data)
+
+    # 交换 UV 平面的顺序
+    for i in range(y_size, len(nv12_data), 2):
+        if i + 1 < len(nv12_data):
+            nv12_data[i], nv12_data[i + 1] = nv12_data[i + 1], nv12_data[i]
+
+    return bytes(nv12_data)
+
+
+def parse_yuv_filename(filename):
+    """
+    从文件名中解析宽高信息
+    支持格式: name_WIDTHxHEIGHT.nv12 或 name_WIDTHxHEIGHT.nv21
+    例如: frame_1920x1080.nv12, image_1280x720.nv21
+    返回: (width, height) 或 None
+    """
+    # 匹配 _数字x数字 模式
+    match = re.search(r'_(\d+)x(\d+)\.nv(?:12|21)$', filename, re.IGNORECASE)
+    if match:
+        return int(match.group(1)), int(match.group(2))
+    return None
+
+
+def load_raw_yuv_file(file_path):
+    """
+    加载原始 NV12/NV21 文件
+    宽高优先级: 1. 配置的 YUV_WIDTH/YUV_HEIGHT  2. 从文件名解析
+    返回: (nv12_data, width, height) 或 None
+    """
+    file_path = Path(file_path)
+    filename = file_path.name.lower()
+
+    # 优先使用配置的宽高，否则从文件名解析
+    if YUV_WIDTH > 0 and YUV_HEIGHT > 0:
+        width, height = YUV_WIDTH, YUV_HEIGHT
+    else:
+        dims = parse_yuv_filename(filename)
+        if dims is None:
+            print(f"    警告: 未配置 YUV_WIDTH/YUV_HEIGHT，且无法从文件名解析宽高")
+            print(f"    请在脚本头部配置 YUV_WIDTH 和 YUV_HEIGHT，或使用格式: name_WIDTHxHEIGHT.nv21")
+            return None
+        width, height = dims
+
+    expected_size = width * height * 3 // 2
+
+    # 读取文件
+    with open(file_path, 'rb') as f:
+        raw_data = f.read()
+
+    if len(raw_data) != expected_size:
+        print(f"    警告: 文件大小不匹配，期望 {expected_size} 字节 ({width}x{height})，实际 {len(raw_data)} 字节")
+        return None
+
+    # 如果是 NV21，转换为 NV12
+    if filename.endswith('.nv21'):
+        nv12_data = nv21_to_nv12(raw_data, width, height)
+        return nv12_data, width, height
+    else:
+        return raw_data, width, height
+
+
 def load_images_as_nv12(img_dir, rotation=0):
-    """从文件夹加载图片并转换为 NV12 格式"""
+    """从文件夹加载图片并转换为 NV12 格式，支持 jpg/png 和原始 nv12/nv21 文件"""
     images_data = []
     widths = []
     heights = []
@@ -119,18 +196,22 @@ def load_images_as_nv12(img_dir, rotation=0):
     lens = []
     image_paths = []
 
-    # 支持的图片格式
-    supported_exts = {'.jpg', '.jpeg', '.png', '.bmp'}
+    # 支持的格式
+    image_exts = {'.jpg', '.jpeg', '.png', '.bmp'}
+    yuv_exts = {'.nv12', '.nv21'}
 
-    # 读取文件夹中的所有图片
+    # 读取文件夹中的所有文件
     img_path = Path(img_dir)
     if not img_path.exists():
         print(f"错误: 文件夹不存在: {img_dir}")
         return None
 
     for file_path in sorted(img_path.iterdir()):
-        if file_path.suffix.lower() in supported_exts:
-            print(f"  读取: {file_path}")
+        suffix = file_path.suffix.lower()
+
+        if suffix in image_exts:
+            # 处理图片文件
+            print(f"  读取图片: {file_path}")
             bgr_image = cv2.imread(str(file_path))
             if bgr_image is None:
                 print(f"    警告: 无法读取图片，跳过")
@@ -147,6 +228,25 @@ def load_images_as_nv12(img_dir, rotation=0):
             image_paths.append(str(file_path))
 
             print(f"    尺寸: {width}x{height}, NV12 大小: {len(nv12_data)} bytes")
+
+        elif suffix in yuv_exts:
+            # 处理原始 NV12/NV21 文件
+            print(f"  读取 YUV: {file_path}")
+            result = load_raw_yuv_file(file_path)
+            if result is None:
+                continue
+
+            nv12_data, width, height = result
+
+            images_data.append(nv12_data)
+            widths.append(width)
+            heights.append(height)
+            rotations.append(rotation)
+            lens.append(len(nv12_data))
+            image_paths.append(str(file_path))
+
+            fmt = "NV21->NV12" if suffix == '.nv21' else "NV12"
+            print(f"    尺寸: {width}x{height}, {fmt} 大小: {len(nv12_data)} bytes")
 
     if not images_data:
         print("错误: 没有找到有效的图片")

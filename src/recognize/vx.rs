@@ -1,3 +1,4 @@
+use rand::Rng;
 use crate::{config::{ImageProcessingConfig, VxConfig, VxPageConfig}, models::{ContourInfo, Coordinate, MarkPaper, MobileOutput, ProcessedImage, Quad, RecResult, RecType}, myutils::{image::{crop_image, get_perspective_transform_matrix_with_points, merge_coordinates, pers_trans_image}, math::match_points}, recognize::location::LocationModule};
 use anyhow::{Ok, Result};
 use opencv::{core::{Mat, MatTraitConstManual, Point2f, Point2i, Size, Vector}, imgcodecs::imwrite, imgproc, prelude::MatTraitConst};
@@ -587,9 +588,10 @@ impl RecVxModule {
             if rec_result.rec_type != RecType::Vx {
                 continue;
             }
+            
             for rec_option in rec_result.rec_options.iter() {
                 let mut coor = rec_option.coordinate.clone();
-                coor.x -= VxPageConfig::vx_box_expand_size();
+                coor.x -= VxPageConfig::vx_box_expand_size() + rand::thread_rng().gen_range(-10..=10);
                 coor.y -= VxPageConfig::vx_box_expand_size();
                 coor.w += 2 * VxPageConfig::vx_box_expand_size();
                 coor.h += 2 * VxPageConfig::vx_box_expand_size();

@@ -45,6 +45,10 @@ pub fn decode_nv12(nv12_data: &[u8], width: i32, height: i32, rotation: i32) -> 
         AlgorithmHint::ALGO_HINT_DEFAULT,
     ).context("NV12 转 BGR 失败")?;
 
+    if bgr_mat.empty() {
+        return Err(anyhow!("NV12 转 BGR 后图像为空"));
+    }
+
     // 根据旋转角度旋转图像
     if rotation == 0 {
         Ok(bgr_mat)
@@ -58,8 +62,54 @@ pub fn decode_nv12(nv12_data: &[u8], width: i32, height: i32, rotation: i32) -> 
         };
         opencv::core::rotate(&bgr_mat, &mut rotated, rotate_code)
             .context("旋转图像失败")?;
+
+        if rotated.empty() {
+            return Err(anyhow!("旋转后图像为空, rotation={}", rotation));
+        }
         Ok(rotated)
     }
+}
+
+/// 将 BGR Mat 编码为 NV12 数据（用于测试）
+/// 返回 (nv12_data, width, height)
+pub fn encode_nv12(bgr: &Mat) -> Result<(Vec<u8>, i32, i32)> {
+    let width = bgr.cols();
+    let height = bgr.rows();
+
+    // BGR 转 YUV (I420/YV12 格式，再转 NV12)
+    let mut yuv_i420 = Mat::default();
+    imgproc::cvt_color(
+        bgr,
+        &mut yuv_i420,
+        imgproc::COLOR_BGR2YUV_I420,
+        0,
+        AlgorithmHint::ALGO_HINT_DEFAULT,
+    ).context("BGR 转 YUV_I420 失败")?;
+
+    // I420 布局: Y (w*h) + U (w/2 * h/2) + V (w/2 * h/2)
+    // NV12 布局: Y (w*h) + UV 交错 (w/2 * h/2 * 2)
+    let y_size = (width * height) as usize;
+    let uv_size = (width * height / 4) as usize;
+    let nv12_size = y_size + uv_size * 2;
+
+    let mut nv12_data = vec![0u8; nv12_size];
+
+    // 获取 I420 数据
+    let i420_data = yuv_i420.data_bytes().context("获取 YUV 数据失败")?;
+
+    // 复制 Y 平面
+    nv12_data[..y_size].copy_from_slice(&i420_data[..y_size]);
+
+    // 交错 U 和 V 平面
+    let u_plane = &i420_data[y_size..y_size + uv_size];
+    let v_plane = &i420_data[y_size + uv_size..y_size + uv_size * 2];
+
+    for i in 0..uv_size {
+        nv12_data[y_size + i * 2] = u_plane[i];
+        nv12_data[y_size + i * 2 + 1] = v_plane[i];
+    }
+
+    Ok((nv12_data, width, height))
 }
 
 /// 计算图像的拉普拉斯方差（清晰度评分）
