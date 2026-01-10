@@ -34,7 +34,7 @@ mod tests {
 
     #[test]
     fn test_paper() -> Result<()> {
-        let scan_id = "13601";
+        let scan_id = "13588";
         let scan_path = format!("dev/test_data/cards/{scan_id}/test.json");
         let img_path = format!("dev/test_data/cards/{scan_id}/test.jpg");
         let image = imread(&img_path, opencv::imgcodecs::IMREAD_COLOR)?;
@@ -49,48 +49,15 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn test_crop() -> Result<()> {
-        let scan_id = "13588";
-        let scan_path = format!("dev/test_data/cards/{scan_id}/test.json");
-        let img_path = format!("dev/test_data/cards/{scan_id}/test.jpg");
-        let image = imread(&img_path, opencv::imgcodecs::IMREAD_COLOR)?;
-
-        let scan_string = fs::read_to_string(scan_path)?;
-
-        let engine = engine::RecEngine::new_paper(&scan_string)?;
-        let _ = engine.make_vx_data(
-            &image,
-            &"dev/test_data/mark_test".to_string(),
-            &"A3_wangxu_1".to_string()
-        )?;
-        Ok(())
-    }
-
-    #[test]
-    fn test_vx() -> Result<()> {
-        let scan_id = "13513";
-        let scan_path = format!("dev/test_data/cards/{scan_id}/test.json");
-        let img_path = format!("/Users/xu.wang/Downloads/debug/1_0_input.jpg");
-        let image = imread(&img_path, opencv::imgcodecs::IMREAD_COLOR)?;
-
-        let scan_string = fs::read_to_string(scan_path)?;
-
-        let engine = engine::RecEngine::new_paper(&scan_string)?;
-        let (res, conf) = engine.rec_vx_module.infer_tiny_cnn(&image)?;
-        println!("识别结果: {} {}", res, conf);
-        Ok(())
-    }
-
     /// 批量推理测试: 模拟 inference_batch 接口的完整流程
     /// 读取图片 -> 转 NV12 -> 解码并选择最清晰 -> 识别
     #[test]
     fn test_batch_inference() -> Result<()> {
         use crate::myutils::image::{encode_nv12, decode_nv12_batch_and_select_clearest};
 
-        let BATCH_SCAN_ID = "13601";
-        let BATCH_IMG_DIR = "/Users/xu.wang/Downloads/码点异常";
-        let ROTATION: u8 = 90; // 测试旋转角度
+        let BATCH_SCAN_ID = "13603";
+        let BATCH_IMG_DIR = "/Users/xu.wang/Downloads/1.9case77ti3";
+        let ROTATION: u8 = 0; // 测试旋转角度
         let scan_path = format!("dev/test_data/cards/{}/test.json", BATCH_SCAN_ID);
         let engine = engine::RecEngine::new_paper(&fs::read_to_string(&scan_path)?)?;
 
@@ -140,6 +107,39 @@ mod tests {
         fs::write(&output_path, to_json(&res)?)?;
         println!("识别结果已保存到: {}", output_path);
 
+        Ok(())
+    }
+
+    #[test]
+    fn test_crop() -> Result<()> {
+        let scan_id = "13588";
+        let scan_path = format!("dev/test_data/cards/{scan_id}/test.json");
+        let img_path = format!("dev/test_data/cards/{scan_id}/test.jpg");
+        let image = imread(&img_path, opencv::imgcodecs::IMREAD_COLOR)?;
+
+        let scan_string = fs::read_to_string(scan_path)?;
+
+        let engine = engine::RecEngine::new_paper(&scan_string)?;
+        let _ = engine.make_vx_data(
+            &image,
+            &"dev/test_data/mark_test".to_string(),
+            &"A3_wangxu_1".to_string()
+        )?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_vx() -> Result<()> {
+        let scan_id = "13513";
+        let scan_path = format!("dev/test_data/cards/{scan_id}/test.json");
+        let img_path = format!("/Users/xu.wang/Downloads/debug/1_0_input.jpg");
+        let image = imread(&img_path, opencv::imgcodecs::IMREAD_COLOR)?;
+
+        let scan_string = fs::read_to_string(scan_path)?;
+
+        let engine = engine::RecEngine::new_paper(&scan_string)?;
+        let (res, conf) = engine.rec_vx_module.infer_tiny_cnn(&image)?;
+        println!("识别结果: {} {}", res, conf);
         Ok(())
     }
 

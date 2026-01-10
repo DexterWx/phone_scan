@@ -16,6 +16,7 @@ tract-onnx = "0.22"
 ndarray = "0.16"
 rayon = "1.10"
 rand = "0.8"
+rand_distr = "0.4"
 
 [target.'cfg(target_os = "android")'.dependencies]
 opencv = { version = "0.96.0", features = ["clang-runtime"] }

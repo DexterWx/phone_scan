@@ -5,23 +5,28 @@
 - 前缀：子目录名称
 - 尺寸类型：宽>高为a3，否则为a4
 - 编号：从1开始的数字
-最终格式：{name}_{a3/a4}_{number}.jpg
+最终格式：{size_type}_{name}_{number}.jpg
 """
 
 import os
 import shutil
 from pathlib import Path
-from PIL import Image
+from PIL import Image, ImageOps
 
 
 def get_image_size(image_path: str) -> tuple[int, int]:
-    """获取图片尺寸 (width, height)"""
+    """
+    获取图片尺寸 (width, height)
+    ⚠️ 已修复：正确处理 JPG 的 EXIF Orientation
+    """
     with Image.open(image_path) as img:
+        # 关键修复点：应用 EXIF 旋转
+        img = ImageOps.exif_transpose(img)
         return img.size
 
 
 def get_size_type(width: int, height: int) -> str:
-    """根据宽高判断a3还是a4"""
+    """根据宽高判断 a3 / a4（基于视觉方向）"""
     return "a3" if width > height else "a4"
 
 
@@ -68,7 +73,7 @@ def clean_mark_data(input_dir: str, output_dir: str):
                 continue
 
             try:
-                # 获取图片尺寸
+                # 获取图片尺寸（已修复 EXIF 方向问题）
                 width, height = get_image_size(str(img_file))
                 size_type = get_size_type(width, height)
 
@@ -76,7 +81,7 @@ def clean_mark_data(input_dir: str, output_dir: str):
                 new_name = f"{size_type}_{prefix}_{counter}.jpg"
                 new_path = output_path / new_name
 
-                # 复制文件
+                # 复制文件（不改变你原来的行为）
                 shutil.copy2(img_file, new_path)
 
                 print(f"  {img_file.name} -> {new_name} ({width}x{height})")
@@ -101,7 +106,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "-o", "--output",
-        default="/Users/xu.wang/Downloads/mark_data_cleaned",
+        default="/Users/xu.wang/Downloads/mark_data_cleaned_v2",
         help="输出目录路径"
     )
 

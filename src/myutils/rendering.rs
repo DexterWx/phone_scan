@@ -205,7 +205,13 @@ pub fn render_output(
             };
             
             // 只有在rec_result为true时才绘制矩形框
-            if rec_result.rec_result[index] {
+            // 对于VX类型，根据class_id使用不同颜色渲染所有选项
+            if rec_result.rec_type == crate::models::RecType::Vx {
+                if fill_item.class_id == 0 {
+                    render_coordinate(image, &scaled_coord, Some(mode), Some(color), Some(thickness))?;
+                }
+                
+            } else if rec_result.rec_result[index] {
                 // 渲染选中选项的坐标框
                 render_coordinate(image, &scaled_coord, Some(mode), Some(color), Some(thickness))?;
             }

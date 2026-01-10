@@ -318,7 +318,7 @@ impl RecEngine {
         // 9.5 vx区矫正
         // self.rec_vx_module.refine_image(&mut baizheng, &mut mobile_output, mark)?;
         self.rec_vx_module.refine_all_coordinates(&baizheng.closed, &mut mobile_output, 8, 2)?;
-        let file_name = format!("{}_{}.jpg", page_index-1, file_name);
+        let file_name = format!("{}_{}", page_index-1, file_name);
         self.rec_vx_module.create_train_data(&baizheng.rgb, &mobile_output, outdir, &file_name)?;
         
         Ok(mobile_output)

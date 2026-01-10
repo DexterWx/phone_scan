@@ -1,4 +1,4 @@
-use rand::Rng;
+use rand_distr::{Distribution, Normal};
 use crate::{config::{ImageProcessingConfig, VxConfig, VxPageConfig}, models::{ContourInfo, Coordinate, MarkPaper, MobileOutput, ProcessedImage, Quad, RecResult, RecType}, myutils::{image::{crop_image, get_perspective_transform_matrix_with_points, merge_coordinates, pers_trans_image}, math::match_points}, recognize::location::LocationModule};
 use anyhow::{Ok, Result};
 use opencv::{core::{Mat, MatTraitConstManual, Point2f, Point2i, Size, Vector}, imgcodecs::imwrite, imgproc, prelude::MatTraitConst};
@@ -140,12 +140,8 @@ impl RecVxModule {
                 }
             }
 
-            let mut vx_res = false;
             let (class_id, confidence) = self.infer_tiny_cnn(&sub_image)?;
-            if class_id == 0 {
-                vx_res = true;
-            }
-            rec_option.vx = vx_res;
+            rec_option.class_id = class_id as u8;
             rec_option.fill_rate = confidence; // 存储置信度
         }
         Ok(())
@@ -182,18 +178,18 @@ impl RecVxModule {
             .collect::<Result<Vec<_>>>()?;
 
         // 3. 并行推理（使用全局线程池）
-        let results: Vec<(bool, f64)> = sub_images
+        let results: Vec<(u8, f64)> = sub_images
             .par_iter()
             .map(|sub_image| {
                 let (class_id, confidence) = self.infer_tiny_cnn(sub_image).ok()?;
-                Some((class_id == 0, confidence))
+                Some((class_id as u8, confidence))
             })
-            .map(|opt| opt.unwrap_or((false, 0.0)))
+            .map(|opt| opt.unwrap_or((1, 0.0))) // 默认 class_id=1（非选中）
             .collect();
 
         // 4. 回写结果
-        for ((rec_idx, opt_idx, _), (vx_res, confidence)) in tasks.iter().zip(results) {
-            mobile_output.rec_results[*rec_idx].rec_options[*opt_idx].vx = vx_res;
+        for ((rec_idx, opt_idx, _), (class_id, confidence)) in tasks.iter().zip(results) {
+            mobile_output.rec_results[*rec_idx].rec_options[*opt_idx].class_id = class_id;
             mobile_output.rec_results[*rec_idx].rec_options[*opt_idx].fill_rate = confidence;
         }
 
@@ -280,35 +276,32 @@ impl RecVxModule {
     }
 
     /// 分类：Softmax + Argmax，返回 (class_id, confidence)
+    /// 支持任意数量的分类
     pub fn classify(&self, output: ArrayViewD<f32>) -> Result<(usize, f64)> {
         let shape = output.shape();
         if shape.len() != 2 || shape[0] != 1 {
-            anyhow::bail!("invalid output shape {:?}, expected [1, 2]", shape);
+            anyhow::bail!("invalid output shape {:?}, expected [1, num_classes]", shape);
         }
 
         let num_classes = shape[1];
-        if num_classes != 2 {
-            anyhow::bail!("expected 2 classes, got {}", num_classes);
+        if num_classes < 2 {
+            anyhow::bail!("expected at least 2 classes, got {}", num_classes);
         }
 
         // Softmax
-        let logit0 = output[[0, 0]];
-        let logit1 = output[[0, 1]];
-
-        let max_logit = f32::max(logit0, logit1);
-        let exp0 = (logit0 - max_logit).exp();
-        let exp1 = (logit1 - max_logit).exp();
-        let sum_exp = exp0 + exp1;
-
-        let prob0 = exp0 / sum_exp;
-        let prob1 = exp1 / sum_exp;
+        let logits: Vec<f32> = (0..num_classes).map(|i| output[[0, i]]).collect();
+        let max_logit = logits.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+        let exps: Vec<f32> = logits.iter().map(|&x| (x - max_logit).exp()).collect();
+        let sum_exp: f32 = exps.iter().sum();
+        let probs: Vec<f32> = exps.iter().map(|&e| e / sum_exp).collect();
 
         // Argmax
-        if prob0 > prob1 {
-            Ok((0, prob0 as f64))
-        } else {
-            Ok((1, prob1 as f64))
-        }
+        let (best_idx, &best_prob) = probs.iter()
+            .enumerate()
+            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+            .unwrap();
+
+        Ok((best_idx, best_prob as f64))
     }
 
     /// 快速预筛选（基于填涂率）
@@ -334,36 +327,39 @@ impl RecVxModule {
     }
 
     fn set_vx(&self, mobile_output: &mut MobileOutput) -> Result<()> {
+        // class_id == 0 表示"选中"（single/有效划线）
+        const SELECTED_CLASS: u8 = 0;
+
         for rec_result in mobile_output.rec_results.iter_mut() {
             if rec_result.rec_type != RecType::Vx {
                 continue;
             }
 
-            // 找出所有 vx=true 的选项
-            let true_indices: Vec<usize> = rec_result.rec_options.iter()
+            // 找出所有 class_id == 0 的选项（选中状态）
+            let selected_indices: Vec<usize> = rec_result.rec_options.iter()
                 .enumerate()
-                .filter(|(_, opt)| opt.vx)
+                .filter(|(_, opt)| opt.class_id == SELECTED_CLASS)
                 .map(|(idx, _)| idx)
                 .collect();
 
-            // 如果有多个 vx=true，只保留置信度等于最大值的
-            if true_indices.len() > 1 {
+            // 如果有多个选中，只保留置信度最高的
+            if selected_indices.len() > 1 {
                 // 找到最大置信度
-                let max_confidence = true_indices.iter()
+                let max_confidence = selected_indices.iter()
                     .map(|&idx| rec_result.rec_options[idx].fill_rate)
                     .fold(f64::NEG_INFINITY, f64::max);
 
-                // 将置信度小于最大值的置为 false
-                for &idx in &true_indices {
+                // 将置信度小于最大值的置为非选中（class_id = 1）
+                for &idx in &selected_indices {
                     if rec_result.rec_options[idx].fill_rate < max_confidence {
-                        rec_result.rec_options[idx].vx = false;
+                        rec_result.rec_options[idx].class_id = 1;
                     }
                 }
             }
 
-            // 设置 rec_result
+            // 设置 rec_result：只有 class_id == 0 才算 true
             for (index, rec_option) in rec_result.rec_options.iter().enumerate() {
-                rec_result.rec_result[index] = rec_option.vx;
+                rec_result.rec_result[index] = rec_option.class_id == SELECTED_CLASS;
             }
         }
         Ok(())
@@ -584,6 +580,8 @@ impl RecVxModule {
     }
 
     pub fn create_train_data(&self, image: &Mat, output: &MobileOutput, out_dir: &String, file_name: &String) -> Result<()> { 
+        // 正态分布：均值0，标准差2
+        // let normal = Normal::new(0.0_f64, 2.0).unwrap();
         for rec_result in output.rec_results.iter() { 
             if rec_result.rec_type != RecType::Vx {
                 continue;
@@ -591,7 +589,9 @@ impl RecVxModule {
             
             for rec_option in rec_result.rec_options.iter() {
                 let mut coor = rec_option.coordinate.clone();
-                coor.x -= VxPageConfig::vx_box_expand_size() + rand::thread_rng().gen_range(-10..=10);
+    
+                // let offset = normal.sample(&mut rand::thread_rng()).round().clamp(-10.0, 10.0) as i32;
+                coor.x -= VxPageConfig::vx_box_expand_size();
                 coor.y -= VxPageConfig::vx_box_expand_size();
                 coor.w += 2 * VxPageConfig::vx_box_expand_size();
                 coor.h += 2 * VxPageConfig::vx_box_expand_size();

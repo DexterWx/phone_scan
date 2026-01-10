@@ -258,12 +258,16 @@ pub struct RecResult {
     pub rec_type: RecType
 }
 
-/// 填涂率结果
+/// 识别结果
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RecOption {
+    /// 置信度
     pub fill_rate: f64,
+    /// 坐标
     pub coordinate: Coordinate,
-    pub vx: bool
+    /// VX 分类结果: 0=single(单线/有效), 1=cancel(非单线), 2=...(未来扩展)
+    /// 只有 class_id=0 时才算"选中"
+    pub class_id: u8,
 }
 
 /// 单一连通域信息
@@ -301,7 +305,7 @@ impl MobileOutput {
                         |coordinate| RecOption {
                             fill_rate: 0.0,
                             coordinate: coordinate.clone(),
-                            vx: false
+                            class_id: 1, // 默认非选中
                         }
                     ).collect(),
                     rec_type: rec_item.rec_type
