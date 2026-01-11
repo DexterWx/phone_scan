@@ -1,5 +1,5 @@
 use rand_distr::{Distribution, Normal};
-use crate::{config::{ImageProcessingConfig, VxConfig, VxPageConfig}, models::{ContourInfo, Coordinate, MarkPaper, MobileOutput, ProcessedImage, Quad, RecResult, RecType}, myutils::{image::{crop_image, get_perspective_transform_matrix_with_points, merge_coordinates, pers_trans_image}, math::match_points}, recognize::location::LocationModule};
+use crate::{config::{ImageProcessingConfig, VxConfig, VxPageConfig}, models::{ContourInfo, Coordinate, MarkPaper, MobileOutput, ProcessedImage, Quad, RecResult, RecType}, myutils::{image::{crop_image, get_perspective_transform_matrix_with_points, merge_coordinates, pers_trans_image}, math::match_points, rendering::{Colors, RenderMode, render_coordinate}}, recognize::location::LocationModule};
 use anyhow::{Ok, Result};
 use opencv::{core::{Mat, MatTraitConstManual, Point2f, Point2i, Size, Vector}, imgcodecs::imwrite, imgproc, prelude::MatTraitConst};
 use tract_onnx::prelude::*;
@@ -29,13 +29,18 @@ impl RecVxModule {
     }
 
     pub fn load_model(path: &str) -> Result<TypedRunnableModel<TypedModel>> {
+        // 从配置读取模型输入参数
+        let channels = VxPageConfig::vx_model_channels();
+        let height = VxPageConfig::vx_model_height();
+        let width = VxPageConfig::vx_model_width();
+
         let model = tract_onnx::onnx()
             .model_for_path(path)?
             .with_input_fact(
                 0,
                 InferenceFact::dt_shape(
                     f32::datum_type(),
-                    tvec![1, 3, 36, 50], // TinyCNN 输入尺寸
+                    tvec![1, channels, height, width], // 使用配置参数
                 ),
             )?
             .into_optimized()?
@@ -120,6 +125,13 @@ impl RecVxModule {
     }
 
     fn rec_options(&self, process_image: &ProcessedImage, options: &mut RecResult) -> Result<()> {
+        // 从配置读取通道数，决定使用灰度图还是RGB图
+        let channels = VxPageConfig::vx_model_channels();
+        let source_image = if channels == 1 {
+            &process_image.gray  // 单通道使用灰度图
+        } else {
+            &process_image.rgb   // 多通道使用RGB图
+        };
 
         for rec_option in options.rec_options.iter_mut() {
             let mut coor = rec_option.coordinate.clone();
@@ -128,7 +140,7 @@ impl RecVxModule {
             coor.w += VxPageConfig::vx_box_expand_size() * 2;
             coor.h += VxPageConfig::vx_box_expand_size() * 2;
 
-            let sub_image = crop_image(&process_image.rgb, &coor)?;
+            let sub_image = crop_image(source_image, &coor)?;
 
             // Debug: 保存扩展后的 sub_image
             #[cfg(debug_assertions)]
@@ -149,6 +161,14 @@ impl RecVxModule {
 
     /// 并行推理：将所有 rec_results 中的 Vx 类型 options 扁平化后并行处理
     pub fn infer_parallel(&self, process_image: &ProcessedImage, mobile_output: &mut MobileOutput) -> Result<()> {
+        // 从配置读取通道数，决定使用灰度图还是RGB图
+        let channels = VxPageConfig::vx_model_channels();
+        let source_image = if channels == 1 {
+            &process_image.gray  // 单通道使用灰度图
+        } else {
+            &process_image.rgb   // 多通道使用RGB图
+        };
+
         // 1. 收集所有需要处理的 Vx 类型的 (rec_idx, opt_idx, coordinate)
         let tasks: Vec<(usize, usize, Coordinate)> = mobile_output.rec_results
             .iter()
@@ -173,7 +193,7 @@ impl RecVxModule {
                 coor.y -= VxPageConfig::vx_box_expand_size();
                 coor.w += VxPageConfig::vx_box_expand_size() * 2;
                 coor.h += VxPageConfig::vx_box_expand_size() * 2;
-                crop_image(&process_image.rgb, &coor)
+                crop_image(source_image, &coor)
             })
             .collect::<Result<Vec<_>>>()?;
 
@@ -201,11 +221,11 @@ impl RecVxModule {
 
     /// 新的分类模型推理：0=single（单线），1=cancel（非单线）
     /// 返回 (class_id, confidence)
-    pub fn infer_tiny_cnn(&self, bgr: &Mat) -> Result<(usize, f64)> {
+    pub fn infer_tiny_cnn(&self, image: &Mat) -> Result<(usize, f64)> {
         let onnx_model = self.onnx_model.as_ref().unwrap();
 
         // 1. 预处理（保持比例resize + padding）
-        let input = self.preprocess_for_tiny_cnn(bgr)?;
+        let input = self.preprocess_for_tiny_cnn(image)?;
 
         // 2. 前向推理
         let outputs = onnx_model.run(tvec!(input.into()))?;
@@ -218,27 +238,29 @@ impl RecVxModule {
     }
 
     /// TinyCNN 预处理：保持宽高比 resize + 居中 padding
-    /// Python: img_height=36, img_width50, pad_value=1.0 (白色)
-    pub fn preprocess_for_tiny_cnn(&self, bgr: &Mat) -> Result<Tensor> {
-        let h = bgr.rows();
-        let w = bgr.cols();
+    /// 支持1通道灰度图和3通道RGB图
+    pub fn preprocess_for_tiny_cnn(&self, image: &Mat) -> Result<Tensor> {
+        let h = image.rows();
+        let w = image.cols();
         if h <= 0 || w <= 0 {
             anyhow::bail!("invalid image size {}x{}", w, h);
         }
 
-        // 目标尺寸
-        let img_h = 36;
-        let img_w =50;
+        // 从配置读取参数
+        let channels = VxPageConfig::vx_model_channels();
+        let img_h = VxPageConfig::vx_model_height();
+        let img_w = VxPageConfig::vx_model_width();
+        let padding_value = VxPageConfig::vx_model_padding_value();
 
         // 计算缩放比例，保持宽高比
         let scale = f32::min(img_w as f32 / w as f32, img_h as f32 / h as f32);
         let new_w = (w as f32 * scale) as i32;
         let new_h = (h as f32 * scale) as i32;
 
-        // Resize
+        // Resize（不做颜色转换，如果是单通道，入参本身就是灰度图）
         let mut resized = Mat::default();
         imgproc::resize(
-            bgr,
+            image,
             &mut resized,
             Size::new(new_w, new_h),
             0.0,
@@ -247,32 +269,61 @@ impl RecVxModule {
         )?;
 
         // 确保连续
-        let resized = resized.try_clone()?;
-        let data = resized.data_bytes()?; // BGRBGR...
+        let processed = resized.try_clone()?;
+        let data = processed.data_bytes()?;
 
-        // 创建 padding 后的 tensor [1, 3, 36, 50]，填充值为1.0（白色）
-        let mut input = Array4::<f32>::zeros((1, 3, img_h as usize, img_w as usize));
+        // 根据channels参数处理
+        if channels == 1 {
+            // 单通道灰度图
+            let mut input = if padding_value == 0 {
+                Array4::<f32>::zeros((1, 1, img_h as usize, img_w as usize))
+            } else {
+                Array4::<f32>::ones((1, 1, img_h as usize, img_w as usize))
+            };
 
-        // 计算居中偏移
-        let y_offset = ((img_h - new_h) / 2) as usize;
-        let x_offset = ((img_w - new_w) / 2) as usize;
+            // 计算居中偏移
+            let y_offset = ((img_h - new_h) / 2) as usize;
+            let x_offset = ((img_w - new_w) / 2) as usize;
 
-        // 填充 resized 图像到中心
-        for y in 0..new_h as usize {
-            for x in 0..new_w as usize {
-                let idx = (y * new_w as usize + x) * 3;
-                let b = data[idx] as f32 / 255.0;
-                let g = data[idx + 1] as f32 / 255.0;
-                let r = data[idx + 2] as f32 / 255.0;
-
-                // 注意：OpenCV的BGR顺序 → 模型输入RGB顺序
-                input[[0, 0, y_offset + y, x_offset + x]] = r;
-                input[[0, 1, y_offset + y, x_offset + x]] = g;
-                input[[0, 2, y_offset + y, x_offset + x]] = b;
+            // 填充 resized 图像到中心
+            for y in 0..new_h as usize {
+                for x in 0..new_w as usize {
+                    let idx = y * new_w as usize + x;
+                    let gray = data[idx] as f32 / 255.0;
+                    input[[0, 0, y_offset + y, x_offset + x]] = gray;
+                }
             }
-        }
 
-        Ok(input.into_tensor())
+            Ok(input.into_tensor())
+        } else {
+            // 3通道RGB
+            let mut input = if padding_value == 0 {
+                Array4::<f32>::zeros((1, channels as usize, img_h as usize, img_w as usize))
+            } else {
+                Array4::<f32>::ones((1, channels as usize, img_h as usize, img_w as usize))
+            };
+
+            // 计算居中偏移
+            let y_offset = ((img_h - new_h) / 2) as usize;
+            let x_offset = ((img_w - new_w) / 2) as usize;
+
+            // 填充 resized 图像到中心
+            for y in 0..new_h as usize {
+                for x in 0..new_w as usize {
+                    let idx = (y * new_w as usize + x) * 3;
+                    let b = data[idx] as f32 / 255.0;
+                    let g = data[idx + 1] as f32 / 255.0;
+                    let r = data[idx + 2] as f32 / 255.0;
+
+                    // 注意：OpenCV的BGR顺序 → 模型输入RGB顺序
+                    input[[0, 0, y_offset + y, x_offset + x]] = r;
+                    input[[0, 1, y_offset + y, x_offset + x]] = g;
+                    input[[0, 2, y_offset + y, x_offset + x]] = b;
+                }
+            }
+
+            Ok(input.into_tensor())
+        }
     }
 
     /// 分类：Softmax + Argmax，返回 (class_id, confidence)
@@ -574,6 +625,21 @@ impl RecVxModule {
                 //     refined.x, refined.y
                 // );
                 rec_option.coordinate = refined;
+            }
+        }
+        Ok(())
+    }
+
+    /// 在vxbox上渲染黑框，消除样本差异性。
+    pub fn render_vx_coordinate(&self, image: &mut Mat, output: &MobileOutput) -> Result<()> { 
+        for rec_result in output.rec_results.iter() { 
+            if rec_result.rec_type != RecType::Vx {
+                continue;
+            }
+
+            for rec_option in rec_result.rec_options.iter() { 
+                let mut coor = rec_option.coordinate.clone();
+                let _ = render_coordinate(image, &coor, Some(RenderMode::Hollow), Some(Colors::black()), Some(3))?;
             }
         }
         Ok(())

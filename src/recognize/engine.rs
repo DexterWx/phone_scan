@@ -1,6 +1,6 @@
 use anyhow::{Context, Ok, Result};
 use opencv::core::Mat;
-use crate::config::{AssistLocationSingleConfig, FillPageConfig, FillSingleConfig, ImageProcessingConfig, init_global_thread_pool};
+use crate::config::{AssistLocationSingleConfig, FillPageConfig, FillSingleConfig, ImageProcessingConfig, VxConfig, VxPageConfig, init_global_thread_pool};
 use crate::models::{MarkPaper, MarkSingle, MobileOutput};
 use crate::myutils::image::{get_perspective_transform_matrix_with_boundary, get_perspective_transform_matrix_with_points, pers_trans_image, process_image};
 use crate::myutils::myjson::from_json;
@@ -236,7 +236,15 @@ impl RecEngine {
         // 10.5 vx区矫正
         self.rec_vx_module.refine_all_coordinates(&baizheng.closed, &mut mobile_output, 10, 2)?;
 
-        // 11. vx识别
+        // 11. vx框描黑
+        let fix_image = if VxPageConfig::vx_model_channels()  == 1 {
+            &mut baizheng.gray
+        } else {
+            &mut  baizheng.rgb
+        };
+        self.rec_vx_module.render_vx_coordinate(fix_image, &mobile_output)?;
+
+        // 12. vx识别
         if mark.num_threads > 1 {
             println!("多线程 {:?}", mark.num_threads);
             self.rec_vx_module.infer_parallel(&baizheng, &mut mobile_output)?;
@@ -318,6 +326,7 @@ impl RecEngine {
         // 9.5 vx区矫正
         // self.rec_vx_module.refine_image(&mut baizheng, &mut mobile_output, mark)?;
         self.rec_vx_module.refine_all_coordinates(&baizheng.closed, &mut mobile_output, 8, 2)?;
+        // self.rec_vx_module.render_vx_coordinate(&mut baizheng.rgb, &mobile_output);
         let file_name = format!("{}_{}", page_index-1, file_name);
         self.rec_vx_module.create_train_data(&baizheng.rgb, &mobile_output, outdir, &file_name)?;
         

@@ -39,6 +39,13 @@ def random_gaussian_blur(img):
     return blurred, ksize, sigma
 
 
+def draw_rectangle(img, x=4, y=4, w=42, h=28, thickness=3):
+    """在图像上画黑色矩形框"""
+    color = (0, 0, 0)  # 黑色 (BGR格式)
+    cv2.rectangle(img, (x, y), (x + w, y + h), color, thickness)
+    return img
+
+
 def process_images(input_dir, output_dir, preview=False):
     """处理1_a4开头的图片"""
     input_path = Path(input_dir)
@@ -66,12 +73,14 @@ def process_images(input_dir, output_dir, preview=False):
 
         # 最弱模糊
         blurred_min = gaussian_blur(img, KSIZE_MIN, SIGMA_MIN)
+        blurred_min = draw_rectangle(blurred_min)
         name_min = make_blur_name(f.name, "_blur_min")
         cv2.imwrite(str(output_path / name_min), blurred_min)
         print(f"最弱模糊: {name_min} -> ksize={KSIZE_MIN}, sigma={SIGMA_MIN}")
 
         # 最强模糊
         blurred_max = gaussian_blur(img, KSIZE_MAX, SIGMA_MAX)
+        blurred_max = draw_rectangle(blurred_max)
         name_max = make_blur_name(f.name, "_blur_max")
         cv2.imwrite(str(output_path / name_max), blurred_max)
         print(f"最强模糊: {name_max} -> ksize={KSIZE_MAX}, sigma={SIGMA_MAX}")
@@ -84,6 +93,7 @@ def process_images(input_dir, output_dir, preview=False):
             continue
 
         blurred, ksize, sigma = random_gaussian_blur(img)
+        blurred = draw_rectangle(blurred)
 
         # 保存
         out_name = make_blur_name(f.name)

@@ -116,6 +116,12 @@ pub trait VxConfig {
     fn component_min_points() -> usize;
     fn pac_min_points_count() -> usize;
     fn vx_box_expand_size() -> i32;
+
+    // VX模型输入参数
+    fn vx_model_channels() -> i32;  // 通道数：1=灰度，3=RGB
+    fn vx_model_height() -> i32;    // 模型输入高度
+    fn vx_model_width() -> i32;     // 模型输入宽度
+    fn vx_model_padding_value() -> i32;  // padding填充值：0=黑色，1=白色
 }
 
 pub struct VxPageConfig;
@@ -143,6 +149,12 @@ impl VxConfig for VxPageConfig {
     fn component_min_points() -> usize { 4 }
     fn pac_min_points_count() -> usize { 18 }
     fn vx_box_expand_size() -> i32 { 4 }
+
+    // VX模型输入参数（默认3通道RGB）
+    fn vx_model_channels() -> i32 { 1 }      // 3通道RGB
+    fn vx_model_height() -> i32 { 36 }       // 高度36
+    fn vx_model_width() -> i32 { 50 }        // 宽度50
+    fn vx_model_padding_value() -> i32 { 0 } // padding用黑色
 }
 
 /// 初始化全局 rayon 线程池
