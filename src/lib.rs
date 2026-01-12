@@ -34,7 +34,7 @@ mod tests {
 
     #[test]
     fn test_paper() -> Result<()> {
-        let scan_id = "13603";
+        let scan_id = "13601";
         let scan_path = format!("dev/test_data/cards/{scan_id}/test.json");
         let img_path = format!("dev/test_data/cards/{scan_id}/test.jpg");
         let image = imread(&img_path, opencv::imgcodecs::IMREAD_COLOR)?;
@@ -132,7 +132,7 @@ mod tests {
     fn test_vx() -> Result<()> {
         let scan_id = "13603";
         let scan_path = format!("dev/test_data/cards/{scan_id}/test.json");
-        let img_path = format!("dev/test_data/debug/sub_images/sub_73.jpg");
+        let img_path = format!("/Users/xu.wang/workspace/gitlab/phone_scan/dev/test_data/debug/sub_images/sub_0_6.jpg");
         let image = imread(&img_path, opencv::imgcodecs::IMREAD_GRAYSCALE)?;
 
         let scan_string = fs::read_to_string(scan_path)?;

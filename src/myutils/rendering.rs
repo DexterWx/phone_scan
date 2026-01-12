@@ -4,7 +4,7 @@ use opencv::{
     imgproc::{circle, fill_poly, line, rectangle},
     prelude::*,
 };
-use crate::models::{AssistLocation, Coordinate, MobileOutput, Quad};
+use crate::{models::{AssistLocation, Coordinate, MobileOutput, Quad}, recognize::fill};
 
 /// 渲染模式
 #[derive(Debug, Clone, Copy)]
@@ -207,7 +207,7 @@ pub fn render_output(
             // 只有在rec_result为true时才绘制矩形框
             // 对于VX类型，根据class_id使用不同颜色渲染所有选项
             if rec_result.rec_type == crate::models::RecType::Vx {
-                if fill_item.class_id == 0 {
+                if rec_result.rec_result[index] {
                     render_coordinate(image, &scaled_coord, Some(mode), Some(color), Some(thickness))?;
                 }
                 
@@ -226,7 +226,11 @@ pub fn render_output(
             
             // 格式化填涂率，保留两位小数
             let fill_rate_text = format!("{:.2}", fill_item.fill_rate);
-            
+            let color = if fill_item.class_id == 0 {
+                Colors::yellow()
+            } else {
+                Colors::blue()
+            };
             // 使用OpenCV的put_text函数渲染文本
             opencv::imgproc::put_text(
                 image,
@@ -234,7 +238,7 @@ pub fn render_output(
                 Point::new(text_x, text_y),
                 opencv::imgproc::FONT_HERSHEY_SIMPLEX,
                 0.3,  // 根据缩放调整字体大小
-                Colors::blue(),
+                color,
                 1,
                 opencv::imgproc::LINE_8,
                 false

@@ -142,19 +142,19 @@ impl RecVxModule {
 
             let sub_image = crop_image(source_image, &coor)?;
 
+            let (class_id, confidence) = self.infer_tiny_cnn(&sub_image)?;
+            rec_option.class_id = class_id as u8;
+            rec_option.fill_rate = confidence; // 存储置信度
+
             // Debug: 保存扩展后的 sub_image
             #[cfg(debug_assertions)]
             {
                 unsafe {
                     COUNT += 1;
-                    let out_path = format!("dev/test_data/debug/sub_images/sub_{:?}.jpg", COUNT);
+                    let out_path = format!("dev/test_data/debug/sub_images/sub_{class_id}_{:?}.jpg", COUNT);
                     imwrite(&out_path, &sub_image, &Vector::<i32>::new())?;
                 }
             }
-
-            let (class_id, confidence) = self.infer_tiny_cnn(&sub_image)?;
-            rec_option.class_id = class_id as u8;
-            rec_option.fill_rate = confidence; // 存储置信度
         }
         Ok(())
     }
@@ -386,31 +386,28 @@ impl RecVxModule {
                 continue;
             }
 
-            // 找出所有 class_id == 0 的选项（选中状态）
-            let selected_indices: Vec<usize> = rec_result.rec_options.iter()
+            // 找出所有 class_id == 0 的选项索引及其置信度
+            let selected_with_confidence: Vec<(usize, f64)> = rec_result.rec_options.iter()
                 .enumerate()
                 .filter(|(_, opt)| opt.class_id == SELECTED_CLASS)
-                .map(|(idx, _)| idx)
+                .map(|(idx, opt)| (idx, opt.fill_rate))
                 .collect();
 
-            // 如果有多个选中，只保留置信度最高的
-            if selected_indices.len() > 1 {
-                // 找到最大置信度
-                let max_confidence = selected_indices.iter()
-                    .map(|&idx| rec_result.rec_options[idx].fill_rate)
-                    .fold(f64::NEG_INFINITY, f64::max);
+            // 找到置信度最高的选中项索引（如果有多个 class_id==0，只保留最高的）
+            let best_selected_idx: Option<usize> = if selected_with_confidence.len() <= 1 {
+                selected_with_confidence.first().map(|(idx, _)| *idx)
+            } else {
+                // 多个选中时，只取置信度最高的
+                selected_with_confidence.iter()
+                    .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+                    .map(|(idx, _)| *idx)
+            };
 
-                // 将置信度小于最大值的置为非选中（class_id = 1）
-                for &idx in &selected_indices {
-                    if rec_result.rec_options[idx].fill_rate < max_confidence {
-                        rec_result.rec_options[idx].class_id = 1;
-                    }
-                }
-            }
-
-            // 设置 rec_result：只有 class_id == 0 才算 true
+            // 设置 rec_result：只有 class_id == 0 且是最高置信度的才算 true
+            // 保留原始 class_id 不变，方便 debug 查看模型推理结果
             for (index, rec_option) in rec_result.rec_options.iter().enumerate() {
-                rec_result.rec_result[index] = rec_option.class_id == SELECTED_CLASS;
+                rec_result.rec_result[index] = rec_option.class_id == SELECTED_CLASS
+                    && best_selected_idx == Some(index);
             }
         }
         Ok(())
