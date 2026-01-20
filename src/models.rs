@@ -114,7 +114,12 @@ pub enum RecType {
     /// 多选题
     MultipleChoice = 2,
     // 划分题
-    Vx = 3
+    Vx = 3,
+    /// 手写识别
+    HandWriting = 4,
+    /// 定位
+    Location = 5
+    
 }
 
 impl From<i32> for RecType {
@@ -123,6 +128,8 @@ impl From<i32> for RecType {
             1 => RecType::SingleChoice,
             2 => RecType::MultipleChoice,
             3 => RecType::Vx,
+            4 => RecType::HandWriting,
+            5 => RecType::Location,
             _ => RecType::SingleChoice, // 默认值
         }
     }
@@ -288,7 +295,7 @@ pub struct MobileOutput {
     pub message: String,
     pub page_number: usize,
     /// 对应输入的rec_items的识别结果
-    pub rec_results: Vec<RecResult>
+    pub rec_results: Vec<RecResult>,
 }
 
 impl MobileOutput {

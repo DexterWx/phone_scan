@@ -28,12 +28,23 @@ os.close(_devnull)
 # ============== 参数配置区 ==============
 IMG_DIR = "/Users/xu.wang/Downloads/Batch_20260110_121610_787"      # 图片文件夹路径
 MARK_JSON = "dev/test_data/cards/13601/test.json"  # 模板 JSON 路径
-ROTATION = 180                            # 旋转角度: 0, 90, 180, 270
+ROTATION = 0                            # 旋转角度: 0, 90, 180, 270
+OUTPUT_IMAGE = "dev/test_data/out/batch_nv12_render.png"  # 输出渲染图片路径
 
 # NV12/NV21 原始文件的宽高配置（如果文件名中没有宽高信息则使用此配置）
 YUV_WIDTH = 2560                        # YUV 图像宽度
 YUV_HEIGHT = 1440                       # YUV 图像高度
 # ========================================
+
+
+# 定义 InferenceBatchResult 结构体
+class InferenceBatchResult(ctypes.Structure):
+    _fields_ = [
+        ("json", ctypes.POINTER(ctypes.c_char)),  # 裸指针，避免 Python 自动管理内存
+        ("image_data", ctypes.POINTER(ctypes.c_uint8)),
+        ("width", ctypes.c_uint32),
+        ("height", ctypes.c_uint32),
+    ]
 
 
 def find_library():
@@ -71,7 +82,7 @@ def load_library():
     lib.initialize_paper.argtypes = [ctypes.c_char_p]
     lib.initialize_paper.restype = ctypes.c_char_p
 
-    lib.inference_batch.argtypes = [
+    lib.inference_batch_v2.argtypes = [
         ctypes.POINTER(ctypes.c_uint8),  # images
         ctypes.POINTER(ctypes.c_uint32), # widths
         ctypes.POINTER(ctypes.c_uint32), # heights
@@ -79,13 +90,20 @@ def load_library():
         ctypes.POINTER(ctypes.c_uint32), # lens
         ctypes.c_uint32,                 # count
     ]
-    lib.inference_batch.restype = ctypes.c_char_p
+    lib.inference_batch_v2.restype = InferenceBatchResult
 
     lib.destroy_engine.argtypes = []
     lib.destroy_engine.restype = None
 
-    lib.free_string.argtypes = [ctypes.c_char_p]
+    lib.free_string.argtypes = [ctypes.POINTER(ctypes.c_char)]  # 裸指针
     lib.free_string.restype = None
+
+    lib.free_image_data.argtypes = [
+        ctypes.POINTER(ctypes.c_uint8),  # image_data
+        ctypes.c_uint32,                 # width
+        ctypes.c_uint32,                 # height
+    ]
+    lib.free_image_data.restype = None
 
     return lib
 
@@ -308,11 +326,11 @@ def main():
     rotations_array = (ctypes.c_uint8 * count)(*data['rotations'])
     lens_array = (ctypes.c_uint32 * count)(*data['lens'])
 
-    # 调用 inference_batch
+    # 调用 inference_batch_v2
     print("\n开始推理...")
     start_time = time.time()
 
-    result = lib.inference_batch(
+    result = lib.inference_batch_v2(
         ctypes.cast(images_array, ctypes.POINTER(ctypes.c_uint8)),
         ctypes.cast(widths_array, ctypes.POINTER(ctypes.c_uint32)),
         ctypes.cast(heights_array, ctypes.POINTER(ctypes.c_uint32)),
@@ -323,8 +341,9 @@ def main():
 
     elapsed_time = time.time() - start_time
 
-    # 解析结果
-    result_json = json.loads(result.decode('utf-8'))
+    # 解析 JSON 结果（使用 ctypes.string_at 从裸指针读取字符串）
+    json_str = ctypes.string_at(result.json).decode('utf-8')
+    result_json = json.loads(json_str)
 
     print("\n" + "=" * 50)
     print("推理结果:")
@@ -335,18 +354,41 @@ def main():
 
     rec_results = result_json.get('rec_results', [])
     print(f"  识别项数: {len(rec_results)}")
+    print(f"  图片尺寸: {result.width}x{result.height}")
     print("=" * 50)
 
-    # 保存完整结果
-    output_path = "dev/test_data/out/batch_nv12_result.json"
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    with open(output_path, 'w', encoding='utf-8') as f:
+    # 保存完整 JSON 结果
+    output_json_path = "dev/test_data/out/batch_nv12_result.json"
+    os.makedirs(os.path.dirname(output_json_path), exist_ok=True)
+    with open(output_json_path, 'w', encoding='utf-8') as f:
         json.dump(result_json, f, ensure_ascii=False, indent=2)
-    print(f"\n完整结果已保存到: {output_path}")
+    print(f"\nJSON 结果已保存到: {output_json_path}")
+
+    # 保存渲染图片
+    if result.width > 0 and result.height > 0 and result.image_data:
+        # 将 RGB 数据转换为 numpy 数组
+        img_size = result.width * result.height * 3
+        rgb_data = np.ctypeslib.as_array(result.image_data, shape=(img_size,))
+        rgb_image = rgb_data.reshape((result.height, result.width, 3))
+
+        # RGB -> BGR (OpenCV 格式)
+        bgr_image = cv2.cvtColor(rgb_image, cv2.COLOR_RGB2BGR)
+
+        # 保存图片
+        os.makedirs(os.path.dirname(OUTPUT_IMAGE), exist_ok=True)
+        cv2.imwrite(OUTPUT_IMAGE, bgr_image)
+        print(f"渲染图片已保存到: {OUTPUT_IMAGE}")
+
+    # 释放内存
+    lib.free_string(result.json)
+    print("\n已释放 JSON 内存")
+    if result.image_data:
+        lib.free_image_data(result.image_data, result.width, result.height)
+        print("\n已释放图片内存")
 
     # 销毁引擎
     lib.destroy_engine()
-    print("\n引擎已销毁")
+    print("引擎已销毁")
 
 
 if __name__ == "__main__":

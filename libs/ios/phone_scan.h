@@ -62,6 +62,28 @@
  */
 #define CommonConfig_PAGE_NUMBER_EXTEND_SIZE 20
 
+/**
+ * FFI 返回结构体，包含 JSON 和 RGB 图片数据
+ */
+typedef struct InferenceBatchResult {
+  /**
+   * JSON 字符串指针
+   */
+  char *json;
+  /**
+   * RGB 图片数据指针（3通道）
+   */
+  uint8_t *image_data;
+  /**
+   * 图片宽度
+   */
+  uint32_t width;
+  /**
+   * 图片高度
+   */
+  uint32_t height;
+} InferenceBatchResult;
+
 char *initialize(const char *mark_ptr);
 
 char *initialize_paper(const char *mark_ptr);
@@ -69,21 +91,6 @@ char *initialize_paper(const char *mark_ptr);
 char *inference(const uint8_t *data_ptr, uintptr_t data_len);
 
 char *inference_paper(const uint8_t *data_ptr, uintptr_t data_len);
-
-/**
- * 销毁引擎，释放资源
- */
-void destroy_engine(void);
-
-/**
- * 释放C字符串内存
- */
-void free_string(char *s);
-
-char *create_train_data(const uint8_t *data_ptr,
-                        uintptr_t data_len,
-                        char *out_dir,
-                        char *file_name);
 
 /**
  * 批量推理接口
@@ -105,3 +112,33 @@ char *inference_batch(const uint8_t *images,
                       const uint8_t *rotations,
                       const uint32_t *lens,
                       uint32_t count);
+
+/**
+ * 返回: InferenceBatchResult 包含 JSON 和 RGB 图片数据
+ */
+struct InferenceBatchResult inference_batch_v2(const uint8_t *images,
+                                               const uint32_t *widths,
+                                               const uint32_t *heights,
+                                               const uint8_t *rotations,
+                                               const uint32_t *lens,
+                                               uint32_t count);
+
+/**
+ * 释放 RGB 图片数据内存
+ */
+void free_image_data(uint8_t *image_data, uint32_t width, uint32_t height);
+
+/**
+ * 销毁引擎，释放资源
+ */
+void destroy_engine(void);
+
+/**
+ * 释放C字符串内存
+ */
+void free_string(char *s);
+
+char *create_train_data(const uint8_t *data_ptr,
+                        uintptr_t data_len,
+                        char *out_dir,
+                        char *file_name);

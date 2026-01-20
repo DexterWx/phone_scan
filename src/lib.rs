@@ -34,7 +34,7 @@ mod tests {
 
     #[test]
     fn test_paper() -> Result<()> {
-        let scan_id = "13601";
+        let scan_id = "13603";
         let scan_path = format!("dev/test_data/cards/{scan_id}/test.json");
         let img_path = format!("dev/test_data/cards/{scan_id}/test.jpg");
         let image = imread(&img_path, opencv::imgcodecs::IMREAD_COLOR)?;
@@ -42,7 +42,7 @@ mod tests {
         let scan_string = fs::read_to_string(scan_path)?;
 
         let engine = engine::RecEngine::new_paper(&scan_string)?;
-        let res = engine.inference_paper(&image)?;
+        let (res, _rgb) = engine.inference_paper(&image)?;
 
         fs::write(format!("dev/test_data/out/{scan_id}.json"), to_json(&res)?)?;
 
@@ -102,7 +102,7 @@ mod tests {
         println!("选择最清晰的图片: {}x{}", clearest_image.cols(), clearest_image.rows());
 
         // 3. 进行识别
-        let res = engine.inference_paper(&clearest_image)?;
+        let (res, _rgb) = engine.inference_paper(&clearest_image)?;
         let output_path = format!("dev/test_data/out/batch_{}.json", BATCH_SCAN_ID);
         fs::write(&output_path, to_json(&res)?)?;
         println!("识别结果已保存到: {}", output_path);
@@ -148,9 +148,23 @@ mod tests {
 
 pub mod build {
     use std::ffi::{c_char, CString};
+    use opencv::core::Mat;
     use crate::myutils::image::decode_nv12_batch_and_select_clearest;
-    use crate::{models::{InitInfo, MobileOutput}, myutils::myjson::{c_to_mat, c_to_string, to_json}, recognize::engine::RecEngine};
+    use crate::{models::{InitInfo, MobileOutput}, myutils::myjson::{c_to_mat, c_to_string, mat_to_c, to_json}, recognize::engine::RecEngine};
     static mut ENGINE: Option<RecEngine> = None;
+
+    /// FFI 返回结构体，包含 JSON 和 RGB 图片数据
+    #[repr(C)]
+    pub struct InferenceBatchResult {
+        /// JSON 字符串指针
+        pub json: *mut c_char,
+        /// RGB 图片数据指针（3通道）
+        pub image_data: *mut u8,
+        /// 图片宽度
+        pub width: u32,
+        /// 图片高度
+        pub height: u32,
+    }
     
     #[no_mangle]
     pub extern "C" fn initialize(mark_ptr: *const c_char) -> *mut c_char{
@@ -266,7 +280,8 @@ pub mod build {
                 failed_output.message = success_output.err().unwrap().to_string();
                 return CString::new(to_json(&failed_output).unwrap()).unwrap().into_raw();
             }
-            return CString::new(to_json(&success_output.unwrap()).unwrap()).unwrap().into_raw();
+            let (output, _rgb) = success_output.unwrap();
+            return CString::new(to_json(&output).unwrap()).unwrap().into_raw();
         }
     }
 
@@ -340,10 +355,115 @@ pub mod build {
         unsafe {
             let engine = ENGINE.as_ref().unwrap();
             match engine.inference_paper(&clearest_image) {
-                Ok(output) => CString::new(to_json(&output).unwrap()).unwrap().into_raw(),
+                Ok((output, _rgb)) => CString::new(to_json(&output).unwrap()).unwrap().into_raw(),
                 Err(e) => {
                     failed_output.message = e.to_string();
                     CString::new(to_json(&failed_output).unwrap()).unwrap().into_raw()
+                }
+            }
+        }
+    }
+
+    /// 批量推理接口 V2 - 返回 JSON 和 RGB 图片数据
+    /// 从多张 NV12 图片中选择最清晰的一张进行识别
+    ///
+    /// 参数:
+    /// - images: 所有图片拼接后的连续内存首地址 (NV12 格式)
+    /// - widths: 宽度数组指针
+    /// - heights: 高度数组指针
+    /// - rotations: 旋转角度数组指针 (0, 90, 180, 270)
+    /// - lens: 每张图片的字节长度数组指针
+    /// - count: 图片数量
+    ///
+    /// 返回: InferenceBatchResult 包含 JSON 和 RGB 图片数据
+    #[no_mangle]
+    pub extern "C" fn inference_batch_v2(
+        images: *const u8,
+        widths: *const u32,
+        heights: *const u32,
+        rotations: *const u8,
+        lens: *const u32,
+        count: u32,
+    ) -> InferenceBatchResult {
+
+        let mut failed_output = MobileOutput {
+            code: 1,
+            message: "failed".to_string(),
+            page_number: 0,
+            rec_results: vec![],
+        };
+
+        // 辅助函数：创建失败结果
+        let make_failed_result = |output: &MobileOutput| -> InferenceBatchResult {
+            InferenceBatchResult {
+                json: CString::new(to_json(output).unwrap()).unwrap().into_raw(),
+                image_data: std::ptr::null_mut(),
+                width: 0,
+                height: 0,
+            }
+        };
+
+        // 检查引擎是否初始化
+        unsafe {
+            if ENGINE.is_none() {
+                failed_output.message = "请先初始化引擎".to_string();
+                return make_failed_result(&failed_output);
+            }
+        }
+
+        // 检查图片数量
+        if count == 0 {
+            failed_output.message = "图片数量为 0".to_string();
+            return make_failed_result(&failed_output);
+        }
+
+        // 将指针转换为切片
+        let lens_slice = unsafe { std::slice::from_raw_parts(lens, count as usize) };
+        let total_len: usize = lens_slice.iter().map(|&x| x as usize).sum();
+        let images_slice = unsafe { std::slice::from_raw_parts(images, total_len) };
+        let widths_slice = unsafe { std::slice::from_raw_parts(widths, count as usize) };
+        let heights_slice = unsafe { std::slice::from_raw_parts(heights, count as usize) };
+        let rotations_slice = unsafe { std::slice::from_raw_parts(rotations, count as usize) };
+
+        // 解码并选择最清晰图片
+        let clearest_image = match decode_nv12_batch_and_select_clearest(
+            images_slice,
+            widths_slice,
+            heights_slice,
+            rotations_slice,
+            lens_slice,
+        ) {
+            Ok(img) => img,
+            Err(e) => {
+                failed_output.message = e.to_string();
+                return make_failed_result(&failed_output);
+            }
+        };
+
+        // 使用最清晰的图片进行识别
+        unsafe {
+            let engine = ENGINE.as_ref().unwrap();
+            match engine.inference_paper(&clearest_image) {
+                Ok((output, rgb)) => {
+                    // 转换 RGB 图片数据
+                    match mat_to_c(&rgb) {
+                        Ok((image_data, width, height)) => {
+                            InferenceBatchResult {
+                                json: CString::new(to_json(&output).unwrap()).unwrap().into_raw(),
+                                image_data,
+                                width,
+                                height,
+                            }
+                        }
+                        Err(e) => {
+                            failed_output.message = format!("图片转换失败: {}", e);
+                            make_failed_result(&failed_output)
+                        }
+                    }
+                }
+                Err(e) => {
+                    failed_output.message = e.to_string();
+                    make_failed_result(&failed_output)
                 }
             }
         }
@@ -363,6 +483,18 @@ pub mod build {
         if !s.is_null() {
             unsafe {
                 let _cstring = CString::from_raw(s);
+            }
+        }
+    }
+
+    /// 释放 RGB 图片数据内存
+    #[no_mangle]
+    pub extern "C" fn free_image_data(image_data: *mut u8, width: u32, height: u32) {
+        if !image_data.is_null() && width > 0 && height > 0 {
+            let len = (width * height * 3) as usize; // RGB 3 通道
+            unsafe {
+                let layout = std::alloc::Layout::from_size_align(len, 1).unwrap();
+                std::alloc::dealloc(image_data, layout);
             }
         }
     }

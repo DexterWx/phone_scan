@@ -61,10 +61,7 @@ impl RecEngine {
 
     pub fn inference_single(&self, image: &Mat) -> Result<MobileOutput> {
         let mark = self.mark_single.as_ref().context("引擎未初始化")?;
-        // 1. 初始化输出
-        let mut mobile_output = MobileOutput::new(&mark.rec_items);
-        
-        // 2. 处理图片
+        // 1. 处理图片
         let processed_image = process_image(&image, ImageProcessingConfig::TARGET_WIDTH_A4)?;
         let mut baizheng = processed_image.clone();
         
@@ -97,7 +94,10 @@ impl RecEngine {
             &mut baizheng, &pers_trans_matrix, mark.boundary.x+mark.boundary.w, mark.boundary.y+mark.boundary.h
         )?;
 
-        // 9. 填涂识别
+        // 9. 初始化输出
+        let mut mobile_output = MobileOutput::new(&mark.rec_items);
+
+        // 10. 填涂识别
         self.rec_fill_module.infer::<FillSingleConfig>(&baizheng, &mut mobile_output)?;
 
         // 渲染
@@ -143,7 +143,7 @@ impl RecEngine {
         Ok(mobile_output)
     }
 
-    pub fn inference_paper(&self, image: &Mat) -> Result<MobileOutput> { 
+    pub fn inference_paper(&self, image: &Mat) -> Result<(MobileOutput, Mat)> { 
         let mark = self.mark_paper.as_ref().context("引擎未初始化")?;
         let mark = &mark.resize(ImageProcessingConfig::PAPER_SCAN_TARGET_SCALE);
         let target_width = if mark.is_a4() {
@@ -263,8 +263,8 @@ impl RecEngine {
             imwrite(&debug_path, &render_image, &Vector::<i32>::new())
                 .context("保存调试图片失败")?;
         }
-        
-        Ok(mobile_output)
+
+        Ok((mobile_output, baizheng.rgb))
     }
 
 

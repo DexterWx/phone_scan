@@ -21,7 +21,7 @@ impl RecFillModule {
         self.refine_all_fill_coordinate::<T>(&integral_image, mobile_output)?;
         self.calculate_all_fill_rate(&integral_image, mobile_output)?;
         let fill_rates = mobile_output.rec_results.iter()
-            .filter(|rec_result| rec_result.rec_type != RecType::Vx)
+            .filter(|rec_result| [RecType::SingleChoice, RecType::MultipleChoice].contains(&rec_result.rec_type))
             .flat_map(|rec_result| rec_result.rec_options.iter().map(|item| item.fill_rate))
             .collect::<Vec<f64>>();
         let (mut thresh, _) = crate::myutils::math::otsu_threshold(&fill_rates);
@@ -64,7 +64,7 @@ impl RecFillModule {
 
     pub fn set_default_fill(&self, mobile_output: &mut MobileOutput, thresh: f64) -> Result<()> {
         for rec_result in mobile_output.rec_results.iter_mut() {
-            if rec_result.rec_type != RecType::MultipleChoice && rec_result.rec_type != RecType::SingleChoice{
+            if ![RecType::SingleChoice, RecType::MultipleChoice].contains(&rec_result.rec_type) {
                 continue;
             }
             let fill_items = &mut rec_result.rec_options;
@@ -110,7 +110,7 @@ impl RecFillModule {
 
     pub fn calculate_all_fill_rate(&self, integral_image: &Mat, mobile_output: &mut MobileOutput) -> Result<()> {
         for rec_result in mobile_output.rec_results.iter_mut() {
-            if rec_result.rec_type != RecType::SingleChoice && rec_result.rec_type != RecType::MultipleChoice {
+            if ![RecType::SingleChoice, RecType::MultipleChoice].contains(&rec_result.rec_type) {
                 continue;
             }
             let fill_items = &mut rec_result.rec_options;
@@ -125,7 +125,7 @@ impl RecFillModule {
 
     pub fn refine_all_fill_coordinate<T: FillConfig>(&self, integral_image: &Mat, mobile_output: &mut MobileOutput) -> Result<()> {
         for rec_result in mobile_output.rec_results.iter_mut() {
-            if rec_result.rec_type == RecType::Vx {
+            if ![RecType::SingleChoice, RecType::MultipleChoice].contains(&rec_result.rec_type) {
                 continue;
             }
             let res = self.refine_items_fill_coordinate::<T>(integral_image, &mut rec_result.rec_options);
