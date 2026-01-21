@@ -82,7 +82,7 @@ def load_library():
     lib.initialize_paper.argtypes = [ctypes.c_char_p]
     lib.initialize_paper.restype = ctypes.c_char_p
 
-    lib.inference_batch_v2.argtypes = [
+    lib.inference_batch_and_return_rgb.argtypes = [
         ctypes.POINTER(ctypes.c_uint8),  # images
         ctypes.POINTER(ctypes.c_uint32), # widths
         ctypes.POINTER(ctypes.c_uint32), # heights
@@ -90,7 +90,7 @@ def load_library():
         ctypes.POINTER(ctypes.c_uint32), # lens
         ctypes.c_uint32,                 # count
     ]
-    lib.inference_batch_v2.restype = InferenceBatchResult
+    lib.inference_batch_and_return_rgb.restype = InferenceBatchResult
 
     lib.destroy_engine.argtypes = []
     lib.destroy_engine.restype = None
@@ -326,11 +326,11 @@ def main():
     rotations_array = (ctypes.c_uint8 * count)(*data['rotations'])
     lens_array = (ctypes.c_uint32 * count)(*data['lens'])
 
-    # 调用 inference_batch_v2
+    # 调用 inference_batch_and_return_rgb
     print("\n开始推理...")
     start_time = time.time()
 
-    result = lib.inference_batch_v2(
+    result = lib.inference_batch_and_return_rgb(
         ctypes.cast(images_array, ctypes.POINTER(ctypes.c_uint8)),
         ctypes.cast(widths_array, ctypes.POINTER(ctypes.c_uint32)),
         ctypes.cast(heights_array, ctypes.POINTER(ctypes.c_uint32)),

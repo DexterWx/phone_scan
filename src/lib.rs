@@ -377,7 +377,7 @@ pub mod build {
     ///
     /// 返回: InferenceBatchResult 包含 JSON 和 RGB 图片数据
     #[no_mangle]
-    pub extern "C" fn inference_batch_v2(
+    pub extern "C" fn inference_batch_and_return_rgb(
         images: *const u8,
         widths: *const u32,
         heights: *const u32,
