@@ -294,6 +294,7 @@ pub struct MobileOutput {
     pub code: i32,
     pub message: String,
     pub page_number: usize,
+    pub image_index: usize,
     /// 对应输入的rec_items的识别结果
     pub rec_results: Vec<RecResult>,
 }
@@ -324,6 +325,7 @@ impl MobileOutput {
             code: 0, // 默认状态为成功
             message: "success".to_string(),
             page_number: 0,
+            image_index: 0,
             rec_results,
         }
     }

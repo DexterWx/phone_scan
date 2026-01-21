@@ -28,7 +28,7 @@ os.close(_devnull)
 # ============== 参数配置区 ==============
 IMG_DIR = "/Users/xu.wang/Downloads/Batch_20260110_121610_787"      # 图片文件夹路径
 MARK_JSON = "dev/test_data/cards/13601/test.json"  # 模板 JSON 路径
-ROTATION = 0                            # 旋转角度: 0, 90, 180, 270
+ROTATION = 180                            # 旋转角度: 0, 90, 180, 270
 OUTPUT_IMAGE = "dev/test_data/out/batch_nv12_render.png"  # 输出渲染图片路径
 
 # NV12/NV21 原始文件的宽高配置（如果文件名中没有宽高信息则使用此配置）

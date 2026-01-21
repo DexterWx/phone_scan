@@ -91,7 +91,7 @@ mod tests {
         println!("\n总 NV12 数据: {} bytes", all_nv12_data.len());
 
         // 2. 使用 decode_nv12_batch_and_select_clearest 解码并选择最清晰
-        let clearest_image = decode_nv12_batch_and_select_clearest(
+        let (clearest_image, _image_index) = decode_nv12_batch_and_select_clearest(
             &all_nv12_data,
             &widths,
             &heights,
@@ -224,6 +224,7 @@ pub mod build {
             code: 1,
             message: "failed".to_string(),
             page_number: 0,
+            image_index: 0,
             rec_results: vec![],
         };
 
@@ -257,6 +258,7 @@ pub mod build {
             code: 1,
             message: "failed".to_string(),
             page_number: 0,
+            image_index: 0,
             rec_results: vec![],
         };
 
@@ -311,6 +313,7 @@ pub mod build {
             code: 1,
             message: "failed".to_string(),
             page_number: 0,
+            image_index: 0,
             rec_results: vec![],
         };
 
@@ -337,14 +340,14 @@ pub mod build {
         let rotations_slice = unsafe { std::slice::from_raw_parts(rotations, count as usize) };
 
         // 解码并选择最清晰图片
-        let clearest_image = match decode_nv12_batch_and_select_clearest(
+        let (clearest_image, image_index) = match decode_nv12_batch_and_select_clearest(
             images_slice,
             widths_slice,
             heights_slice,
             rotations_slice,
             lens_slice,
         ) {
-            Ok(img) => img,
+            Ok(result) => result,
             Err(e) => {
                 failed_output.message = e.to_string();
                 return CString::new(to_json(&failed_output).unwrap()).unwrap().into_raw();
@@ -355,7 +358,10 @@ pub mod build {
         unsafe {
             let engine = ENGINE.as_ref().unwrap();
             match engine.inference_paper(&clearest_image) {
-                Ok((output, _rgb)) => CString::new(to_json(&output).unwrap()).unwrap().into_raw(),
+                Ok((mut output, _rgb)) => {
+                    output.image_index = image_index;
+                    CString::new(to_json(&output).unwrap()).unwrap().into_raw()
+                },
                 Err(e) => {
                     failed_output.message = e.to_string();
                     CString::new(to_json(&failed_output).unwrap()).unwrap().into_raw()
@@ -390,6 +396,7 @@ pub mod build {
             code: 1,
             message: "failed".to_string(),
             page_number: 0,
+            image_index: 0,
             rec_results: vec![],
         };
 
@@ -426,14 +433,14 @@ pub mod build {
         let rotations_slice = unsafe { std::slice::from_raw_parts(rotations, count as usize) };
 
         // 解码并选择最清晰图片
-        let clearest_image = match decode_nv12_batch_and_select_clearest(
+        let (clearest_image, image_index) = match decode_nv12_batch_and_select_clearest(
             images_slice,
             widths_slice,
             heights_slice,
             rotations_slice,
             lens_slice,
         ) {
-            Ok(img) => img,
+            Ok(result) => result,
             Err(e) => {
                 failed_output.message = e.to_string();
                 return make_failed_result(&failed_output);
@@ -444,7 +451,8 @@ pub mod build {
         unsafe {
             let engine = ENGINE.as_ref().unwrap();
             match engine.inference_paper(&clearest_image) {
-                Ok((output, rgb)) => {
+                Ok((mut output, rgb)) => {
+                    output.image_index = image_index;
                     // 转换 RGB 图片数据
                     match mat_to_c(&rgb) {
                         Ok((image_data, width, height)) => {
@@ -505,6 +513,7 @@ pub mod build {
             code: 1,
             message: "failed".to_string(),
             page_number: 0,
+            image_index: 0,
             rec_results: vec![],
         };
 

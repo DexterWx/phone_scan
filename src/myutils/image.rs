@@ -202,14 +202,14 @@ pub fn select_clearest_image_owned(images: &[Mat]) -> Result<usize> {
 /// - rotations: 旋转角度数组 (0, 90, 180, 270)
 /// - lens: 每张图片的字节长度数组
 ///
-/// 返回: 最清晰图片的 Mat
+/// 返回: (最清晰图片的 Mat, 图片索引)
 pub fn decode_nv12_batch_and_select_clearest(
     data: &[u8],
     widths: &[u32],
     heights: &[u32],
     rotations: &[u8],
     lens: &[u32],
-) -> Result<Mat> {
+) -> Result<(Mat, usize)> {
     let count = lens.len();
     if count == 0 {
         anyhow::bail!("图片数量为 0");
@@ -256,8 +256,8 @@ pub fn decode_nv12_batch_and_select_clearest(
         decoded_images.push(mat);
     }
 
-    // 返回最清晰图片
-    Ok(decoded_images.swap_remove(clearest_idx))
+    // 返回最清晰图片和索引
+    Ok((decoded_images.swap_remove(clearest_idx), clearest_idx))
 }
 
 /// 从文件夹读取所有图片
