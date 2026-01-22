@@ -26,14 +26,14 @@ os.close(_stderr_fd)
 os.close(_devnull)
 
 # ============== 参数配置区 ==============
-IMG_DIR = "/Users/xu.wang/Downloads/Batch_20260110_121610_787"      # 图片文件夹路径
-MARK_JSON = "dev/test_data/cards/13601/test.json"  # 模板 JSON 路径
-ROTATION = 180                            # 旋转角度: 0, 90, 180, 270
+IMG_DIR = "C:\\Users\\wangx\\Desktop\\test_batch"      # 图片文件夹路径
+MARK_JSON = "dev/test_data/cards/13600/test.json"  # 模板 JSON 路径
+ROTATION = 0                            # 旋转角度: 0, 90, 180, 270
 OUTPUT_IMAGE = "dev/test_data/out/batch_nv12_render.png"  # 输出渲染图片路径
 
 # NV12/NV21 原始文件的宽高配置（如果文件名中没有宽高信息则使用此配置）
-YUV_WIDTH = 2560                        # YUV 图像宽度
-YUV_HEIGHT = 1440                       # YUV 图像高度
+YUV_WIDTH = 3840                        # YUV 图像宽度
+YUV_HEIGHT = 2700                       # YUV 图像高度
 # ========================================
 
 
@@ -54,9 +54,16 @@ def find_library():
 
     # 优先查找 release 版本
     lib_paths = [
+        # Windows MSVC
+        project_root / "target" / "release" / "phone_scan.dll",
+        # Windows GNU
+        project_root / "target" / "release" / "phone_scan.dll",
+        project_root / "target" / "debug" / "phone_scan.dll",
+        # macOS
         project_root / "target" / "release" / "libphone_scan.dylib",
-        project_root / "target" / "release" / "libphone_scan.so",
         project_root / "target" / "debug" / "libphone_scan.dylib",
+        # Linux
+        project_root / "target" / "release" / "libphone_scan.so",
         project_root / "target" / "debug" / "libphone_scan.so",
     ]
 
@@ -76,11 +83,42 @@ def load_library():
         sys.exit(1)
 
     print(f"加载库: {lib_path}")
-    lib = ctypes.CDLL(lib_path)
+
+    # Windows 平台下，需要将 DLL 所在目录添加到 DLL 搜索路径
+    if sys.platform == 'win32':
+        dll_dirs = [str(Path(lib_path).parent)]
+
+        # 添加 OpenCV bin 目录（从环境变量读取）
+        opencv_bin = os.environ.get('OPENCV_BIN')
+        if opencv_bin and Path(opencv_bin).exists():
+            dll_dirs.append(opencv_bin)
+            print(f"找到 OPENCV_BIN: {opencv_bin}")
+        else:
+            print("警告: 未找到 OPENCV_BIN 环境变量")
+            print("如果加载失败，请先执行: .\\build_scripts\\windows_env.ps1")
+
+        # 添加所有 DLL 搜索路径
+        for dll_dir in dll_dirs:
+            print(f"添加 DLL 搜索路径: {dll_dir}")
+            # Python 3.8+ 使用 os.add_dll_directory
+            if hasattr(os, 'add_dll_directory'):
+                os.add_dll_directory(dll_dir)
+            # 旧版本使用环境变量
+            else:
+                os.environ['PATH'] = dll_dir + os.pathsep + os.environ.get('PATH', '')
+
+    try:
+        lib = ctypes.CDLL(lib_path)
+        print("库加载成功")
+    except Exception as e:
+        print(f"加载库失败: {e}")
+        sys.exit(1)
 
     # 设置函数签名
+    print("设置函数签名...")
     lib.initialize_paper.argtypes = [ctypes.c_char_p]
     lib.initialize_paper.restype = ctypes.c_char_p
+    print("initialize_paper 签名设置完成")
 
     lib.inference_batch_and_return_rgb.argtypes = [
         ctypes.POINTER(ctypes.c_uint8),  # images
@@ -297,7 +335,9 @@ def main():
     with open(MARK_JSON, 'r') as f:
         mark_json = f.read()
 
+    print("调用 initialize_paper...")
     init_result = lib.initialize_paper(mark_json.encode('utf-8'))
+    print("initialize_paper 返回成功")
     init_info = json.loads(init_result.decode('utf-8'))
 
     if init_info.get('code', 1) != 0:
