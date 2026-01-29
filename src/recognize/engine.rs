@@ -178,7 +178,7 @@ impl RecEngine {
         
         // 4. 第一次变换
         pers_trans_image(
-            &mut baizheng, &pers_trans_matrix, tg_boundary.x+tg_boundary.w, tg_boundary.y+tg_boundary.h
+            &mut baizheng, &pers_trans_matrix, tg_boundary.x+tg_boundary.w + ImageProcessingConfig::BOUNDARY_EXTEND_SIZE, tg_boundary.y+tg_boundary.h + ImageProcessingConfig::BOUNDARY_EXTEND_SIZE
         )?;
 
         #[cfg(debug_assertions)]
@@ -208,16 +208,14 @@ impl RecEngine {
         // 7. 获取变换矩阵
         let mut src = assist_location.to_points();
         let mut target = page_mark_assist_location.to_points();
-        
-        if src.len() < 8 || target.len() < 8 {
-            src.extend(mark.boundary.to_points());
-            target.extend(mark.boundary.to_points());
-        }
+        src.extend(mark.boundary.to_points());
+        target.extend(mark.boundary.to_points());
+
         let pers_trans_matrix = get_perspective_transform_matrix_with_points(&src, &target)?;
         
         // 8. 第二次变换
         pers_trans_image(
-            &mut baizheng, &pers_trans_matrix, mark.boundary.x+mark.boundary.w, mark.boundary.y+mark.boundary.h
+            &mut baizheng, &pers_trans_matrix, mark.boundary.x+mark.boundary.w + ImageProcessingConfig::BOUNDARY_EXTEND_SIZE, mark.boundary.y+mark.boundary.h + ImageProcessingConfig::BOUNDARY_EXTEND_SIZE
         )?;
         #[cfg(debug_assertions)]
         {
