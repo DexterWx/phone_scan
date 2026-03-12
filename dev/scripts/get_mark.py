@@ -193,6 +193,22 @@ class MarkDataProcessor:
                             "rec_type": 3,
                             "sub_options": tf_part
                         })
+                if "multiple_obj" in page:
+                    if "objective_blocks" in page['multiple_obj']:
+                        for block in page['multiple_obj']['objective_blocks']:
+                            if 'assist_location_left_points' in block:
+                                assist_location['left']+=block['assist_location_left_points']
+                                assist_location['right']+=block['assist_location_right_points']
+                            for item in block['objective_items']:
+                                rec_type = item['options_type']
+                                if rec_type not in [1, 3]:
+                                    continue
+                                rec_type = 1 if rec_type == 1 else 2
+                                sub_options = item['options']
+                                rec_items.append({
+                                    "rec_type": rec_type,
+                                    "sub_options": sub_options
+                                })
                     
                 if index%2==0:
                     for number in page['exam_number']['numbers']:
@@ -206,7 +222,9 @@ class MarkDataProcessor:
                 if "rect_assist_locations" in page:
                     assist_location['left']+=page['rect_assist_locations']['rect_assist_location_left_points']
                     assist_location['right']+=page['rect_assist_locations']['rect_assist_location_right_points']
-                
+                # assist_location去重
+                assist_location['left'] = list({(loc['x'], loc['y']): loc for loc in assist_location['left']}.values())
+                assist_location['right'] = list({(loc['x'], loc['y']): loc for loc in assist_location['right']}.values())
                 pages.append(
                     {
                         "rec_items": rec_items,

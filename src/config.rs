@@ -38,6 +38,9 @@ impl ImageProcessingConfig {
 
     /// 变换后，从边界向外拓展的距离
     pub const BOUNDARY_EXTEND_SIZE: i32 = 40;
+
+    /// 边界贴合距离
+    pub const BOUNDARY_PENALTY: f64 = 11.0;
 }
 
 /// 辅助定位点的寻找
@@ -50,6 +53,7 @@ pub trait AssistLocationConfig {
     fn assist_point_max_area() -> f64;
     fn assist_point_min_fill_ratio() -> f64;
     fn assist_point_whdiff_max() -> i32;
+    fn assist_point_x_median_diff() -> i32;
 }
 
 
@@ -63,6 +67,7 @@ impl AssistLocationConfig for AssistLocationSingleConfig {
     fn assist_point_max_area() -> f64 { 70.0 }
     fn assist_point_min_fill_ratio() -> f64 { 0.9 }
     fn assist_point_whdiff_max() -> i32 { 2 }
+    fn assist_point_x_median_diff() -> i32 { 20 }
 }
 
 pub struct AssistLocationPageConfig;
@@ -75,6 +80,7 @@ impl AssistLocationConfig for AssistLocationPageConfig {
     fn assist_point_max_area() -> f64 { 310.0 }
     fn assist_point_min_fill_ratio() -> f64 { 0.88 }
     fn assist_point_whdiff_max() -> i32 { 4 }
+    fn assist_point_x_median_diff() -> i32 { 20 }
 }
 
 

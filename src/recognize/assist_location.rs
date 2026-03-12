@@ -167,6 +167,33 @@ impl AssistLocationModule {
         }
     }
 
+    // 求所有coor的x中位数，过滤掉x远离中位数的coor
+    fn filter_assist_location_by_x(assist_location: &Vec<Coordinate>) -> Vec<Coordinate> {
+        if assist_location.is_empty() {
+            return Vec::new();
+        }
+
+        // 提取所有x坐标
+        let mut x_values: Vec<i32> = assist_location.iter().map(|c| c.x).collect();
+
+        // 计算中位数
+        x_values.sort_unstable();
+        let median = if x_values.len() % 2 == 0 {
+            let mid = x_values.len() / 2;
+            (x_values[mid - 1] + x_values[mid]) / 2
+        } else {
+            x_values[x_values.len() / 2]
+        };
+
+        let threshold = AssistLocationPageConfig::assist_point_x_median_diff();
+
+        // 过滤掉x值远离中位数的坐标
+        assist_location.iter()
+            .filter(|c| (c.x - median).abs() <= threshold)
+            .cloned()
+            .collect()
+    }
+
     pub fn infer_paper(&self, processed_image: &ProcessedImage, assist_location: &mut AssistLocation) -> Result<AssistLocation> {
         let mut assist_locations = Vec::new();
         let mut split_locations = assist_location.split();
@@ -251,6 +278,8 @@ impl AssistLocationModule {
         }
 
         assist_points.sort_by(|a, b| a.y.cmp(&b.y));
+
+        let assist_points = Self::filter_assist_location_by_x(&assist_points);
         
         Ok(assist_points)
     }

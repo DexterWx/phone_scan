@@ -265,7 +265,6 @@ impl RecEngine {
         Ok((mobile_output, baizheng.rgb))
     }
 
-
     pub fn make_vx_data(&self, image: &Mat, outdir: &String, file_name: &String) -> Result<MobileOutput> { 
         let mark = self.mark_paper.as_ref().context("引擎未初始化")?;
         let mark = &mark.resize(ImageProcessingConfig::PAPER_SCAN_TARGET_SCALE);
