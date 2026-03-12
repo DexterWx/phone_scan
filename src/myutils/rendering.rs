@@ -211,6 +211,8 @@ pub fn render_output(
                     render_coordinate(image, &scaled_coord, Some(mode), Some(color), Some(thickness))?;
                 }
                 
+            } else if rec_result.rec_type == crate::models::RecType::Location {
+                render_coordinate(image, &scaled_coord, Some(mode), Some(color), Some(thickness))?;
             } else if rec_result.rec_result[index] {
                 // 渲染选中选项的坐标框
                 render_coordinate(image, &scaled_coord, Some(mode), Some(color), Some(thickness))?;

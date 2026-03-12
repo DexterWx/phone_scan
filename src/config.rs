@@ -40,7 +40,7 @@ impl ImageProcessingConfig {
     pub const BOUNDARY_EXTEND_SIZE: i32 = 40;
 
     /// 边界贴合距离
-    pub const BOUNDARY_PENALTY: f64 = 11.0;
+    pub const BOUNDARY_PENALTY: f64 = 12.0;
 }
 
 /// 辅助定位点的寻找

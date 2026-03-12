@@ -34,7 +34,7 @@ mod tests {
 
     #[test]
     fn test_paper() -> Result<()> {
-        let scan_id = "13627";
+        let scan_id = "266931";
         let scan_path = format!("dev/test_data/cards/{scan_id}/test.json");
         let img_path = format!("dev/test_data/cards/{scan_id}/test.jpg");
         let image = imread(&img_path, opencv::imgcodecs::IMREAD_COLOR)?;
@@ -284,6 +284,79 @@ pub mod build {
             }
             let (output, _rgb) = success_output.unwrap();
             return CString::new(to_json(&output).unwrap()).unwrap().into_raw();
+        }
+    }
+
+    /// 单张图片推理接口（返回 RGB 图片）
+    /// 识别单张图片并返回识别结果和 RGB 图片数据
+    ///
+    /// 参数:
+    /// - data_ptr: 图片数据指针
+    /// - data_len: 图片数据长度
+    ///
+    /// 返回:
+    /// - InferenceBatchResult: 包含 JSON 结果和 RGB 图片数据
+    #[no_mangle]
+    pub extern "C" fn inference_paper_and_return_rgb(data_ptr: *const u8, data_len: usize) -> InferenceBatchResult {
+        let mut failed_output = MobileOutput {
+            code: 1,
+            message: "failed".to_string(),
+            page_number: 0,
+            image_index: 0,
+            rec_results: vec![],
+        };
+
+        // 辅助函数：创建失败结果
+        let make_failed_result = |output: &MobileOutput| -> InferenceBatchResult {
+            InferenceBatchResult {
+                json: CString::new(to_json(output).unwrap()).unwrap().into_raw(),
+                image_data: std::ptr::null_mut(),
+                width: 0,
+                height: 0,
+            }
+        };
+
+        // 检查引擎是否初始化
+        unsafe {
+            if ENGINE.is_none() {
+                failed_output.message = "请先初始化引擎".to_string();
+                return make_failed_result(&failed_output);
+            }
+        }
+
+        // 解码图片
+        let image = c_to_mat(data_ptr, data_len);
+        if image.is_err() {
+            failed_output.message = image.err().unwrap().to_string();
+            return make_failed_result(&failed_output);
+        }
+
+        // 执行识别
+        unsafe {
+            let engine = ENGINE.as_ref().unwrap();
+            match engine.inference_paper(&image.unwrap()) {
+                Ok((output, rgb)) => {
+                    // 转换 RGB 图片数据
+                    match mat_to_c(&rgb) {
+                        Ok((image_data, width, height)) => {
+                            InferenceBatchResult {
+                                json: CString::new(to_json(&output).unwrap()).unwrap().into_raw(),
+                                image_data,
+                                width,
+                                height,
+                            }
+                        }
+                        Err(e) => {
+                            failed_output.message = format!("图片转换失败: {}", e);
+                            make_failed_result(&failed_output)
+                        }
+                    }
+                }
+                Err(e) => {
+                    failed_output.message = e.to_string();
+                    make_failed_result(&failed_output)
+                }
+            }
         }
     }
 

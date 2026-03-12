@@ -74,12 +74,22 @@ class MarkDataProcessor:
     
     @staticmethod
     def fetch_mark_data(mark_url):
-        """获取标记数据"""
+        """获取标记数据（支持 URL 和本地文件路径）"""
         try:
             print(f"正在获取标记数据: {mark_url}")
+
+            # 检查是否为本地文件路径
+            if os.path.exists(mark_url):
+                print(f"从本地文件读取: {mark_url}")
+                with open(mark_url, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+
+            # 否则作为 URL 处理
+            print(f"从 URL 获取: {mark_url}")
             response = requests.get(mark_url)
             response.raise_for_status()
             return response.json()
+
         except Exception as e:
             print(f"获取标记数据失败: {e}")
             return None
@@ -193,6 +203,7 @@ class MarkDataProcessor:
                             "rec_type": 3,
                             "sub_options": tf_part
                         })
+                # 复合体
                 if "multiple_obj" in page:
                     if "objective_blocks" in page['multiple_obj']:
                         for block in page['multiple_obj']['objective_blocks']:
@@ -209,6 +220,33 @@ class MarkDataProcessor:
                                     "rec_type": rec_type,
                                     "sub_options": sub_options
                                 })
+                # 切图类型
+                for block in page['subjective_blocks']:
+                    if "items" in block:
+                        for item in block['items']:
+                            coor = [{
+                                'x': item['x'],
+                                'y': item['y'],
+                                'w': item['w'],
+                                'h': item['h']
+                            }]
+                            rec_items.append({
+                                "rec_type": 5,
+                                "sub_options": coor
+                            })
+                    else:
+                        coor = [{
+                            'x': block['x'],
+                            'y': block['y'],
+                            'w': block['w'],
+                            'h': block['h']
+                        }]
+                        rec_items.append({
+                            "rec_type": 5,
+                            "sub_options": coor
+                        })
+                        
+                
                     
                 if index%2==0:
                     for number in page['exam_number']['numbers']:
