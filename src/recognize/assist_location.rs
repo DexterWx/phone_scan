@@ -5,6 +5,8 @@ use crate::models::AssistLocation;
 use crate::models::ProcessedImage;
 use crate::myutils::image::merge_coordinates;
 use crate::myutils::rendering::render_coordinates;
+use crate::recognize::align::find_extra_indices_cos;
+use crate::recognize::align::find_missing_indices_cos;
 use crate::recognize::align::{extract_y_centers, find_missing_indices, find_extra_indices, filter_by_extra_indices};
 use anyhow::Ok;
 use anyhow::Result;
@@ -91,7 +93,7 @@ impl AssistLocationModule {
 
             if detected_right_count < expected_count {
                 // 右侧漏检：找出缺失的标注点索引，从右侧标注中删除
-                let missing_indices = find_missing_indices(&left_y, &right_y);
+                let missing_indices = find_missing_indices_cos(&left_y, &right_y);
                 #[cfg(debug_assertions)]
                 {
                     println!("右侧漏检，缺失索引: {:?}", missing_indices);
@@ -110,7 +112,7 @@ impl AssistLocationModule {
                 })
             } else {
                 // 右侧多检：找出多余的检测点索引，过滤掉
-                let extra_indices = find_extra_indices(&left_y, &right_y);
+                let extra_indices = find_extra_indices_cos(&left_y, &right_y);
                 #[cfg(debug_assertions)]
                 {
                     println!("右侧多检，多余索引: {:?}", extra_indices);
@@ -130,7 +132,7 @@ impl AssistLocationModule {
 
             if detected_left_count < expected_count {
                 // 左侧漏检：找出缺失的标注点索引，从左侧标注中删除
-                let missing_indices = find_missing_indices(&right_y, &left_y);
+                let missing_indices = find_missing_indices_cos(&right_y, &left_y);
                 #[cfg(debug_assertions)]
                 {
                     println!("左侧漏检，缺失索引: {:?}", missing_indices);
@@ -149,7 +151,7 @@ impl AssistLocationModule {
                 })
             } else {
                 // 左侧多检：找出多余的检测点索引，过滤掉
-                let extra_indices = find_extra_indices(&right_y, &left_y);
+                let extra_indices = find_extra_indices_cos(&right_y, &left_y);
                 #[cfg(debug_assertions)]
                 {
                     println!("左侧多检，多余索引: {:?}", extra_indices);

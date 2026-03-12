@@ -37,7 +37,7 @@ impl ImageProcessingConfig {
     pub const MARGIN_PENALTY: f64 = 50.0;
 
     /// 变换后，从边界向外拓展的距离
-    pub const BOUNDARY_EXTEND_SIZE: i32 = 20;
+    pub const BOUNDARY_EXTEND_SIZE: i32 = 40;
 }
 
 /// 辅助定位点的寻找

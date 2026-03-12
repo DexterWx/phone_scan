@@ -171,7 +171,7 @@ class MarkDataProcessor:
                     # 判断
                     tf_part = []
                     for option in sub_options:
-                        if option['value'] in ["√", "乄","×"]:
+                        if option['value'] in ["√", "乄","×", "T","F"]:
                             tf_part.append(option)
                     if ten_part:
                         rec_items.append({
